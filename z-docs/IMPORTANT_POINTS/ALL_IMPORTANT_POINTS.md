@@ -54,7 +54,7 @@ Your task is:
   * Basic mock implementation exists
   * Now upgrading to **Enterprise-level Duffel API integration**
   * Using **test credentials initially**, later switching to live mention bellow 
-  DUFFEL_API_KEY=duffel_test_2-D0gIEXNmCQgVhTk1RF4x97XvbFuWpxIAzYNqlDdXd
+  DUFFEL_API_KEY=duffel_test_REPLACE_ME
   DUFFEL_API_URL=https://api.duffel.com
 
 ---

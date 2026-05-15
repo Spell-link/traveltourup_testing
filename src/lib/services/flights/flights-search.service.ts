@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import { AppError } from "@/lib/api/errors";
 import { prisma } from "@/lib/prisma";
 import { createOfferRequest } from "@/lib/duffel/offer-requests";
 import { mapDuffelOfferToDto, type FlightOfferDTO } from "@/lib/duffel/dto/flight-offer.dto";
@@ -122,10 +123,18 @@ export async function runFlightSearch(
   const orqId = raw?.data?.id;
   const rawOffers = raw?.data?.offers;
   if (typeof orqId !== "string") {
-    throw new Error("Duffel offer request missing data.id");
+    throw new AppError(
+      502,
+      "Flight search supplier returned an invalid response.",
+      "UPSTREAM_ERROR",
+    );
   }
   if (!Array.isArray(rawOffers)) {
-    throw new Error("Duffel offer request missing offers array");
+    throw new AppError(
+      502,
+      "Flight search supplier returned an invalid response.",
+      "UPSTREAM_ERROR",
+    );
   }
 
   const offers: FlightOfferDTO[] = [];

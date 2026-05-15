@@ -1,13 +1,10 @@
 import "server-only";
 
 import { Prisma } from "@/generated/prisma";
-import { getFlightPaymentsConfig } from "@/config/flight-payments.config";
 import { AppError } from "@/lib/api/errors";
+import { bookingFinancialEventRepository } from "@/lib/db/repositories/booking-financial-event.repository";
 import { flightPaymentIntentRepository } from "@/lib/db/repositories/flight-payment-intent.repository";
-import {
-  confirmDuffelPaymentIntent,
-  createDuffelPaymentIntent,
-} from "@/lib/duffel/payment-intents";
+import { createDuffelPaymentIntent } from "@/lib/duffel/payment-intents";
 import { computeDuffelPaymentIntentBreakdown } from "@/lib/payments/duffel-intent-pricing";
 import { refreshFlightOffer } from "@/lib/services/flights/flights-offer.service";
 import {
@@ -15,6 +12,7 @@ import {
   parseAncillarySelectionJson,
   validateAndPriceOrderServices,
 } from "@/lib/services/flights/flight-ancillaries.service";
+import { resolveFlightPricingConfigForOffer } from "@/lib/services/flights/flight-pricing-rule.service";
 import type { FlightOrderServiceLine } from "@/lib/validations/flight-ancillaries.schema";
 
 function serializeRecord(row: {
@@ -50,7 +48,6 @@ export async function createFlightCheckoutPaymentIntent(input: {
   idempotencyKey: string | null;
   services: FlightOrderServiceLine[];
 }) {
-  const cfg = getFlightPaymentsConfig();
   const selectionKey = encodeAncillarySelection(input.services);
 
   if (input.idempotencyKey) {
@@ -78,6 +75,13 @@ export async function createFlightCheckoutPaymentIntent(input: {
     throw new AppError(400, "Extras currency does not match offer.", "VALIDATION_ERROR");
   }
 
+  /**
+   * Resolve env defaults overlaid with the highest-priority matching
+   * `FlightPricingRule` (per-route/cabin/carrier) and apply hard caps. See
+   * `flight-pricing-rule.service.ts`.
+   */
+  const cfg = await resolveFlightPricingConfigForOffer(offer);
+
   const breakdown = computeDuffelPaymentIntentBreakdown(
     offer.total_amount,
     offer.total_currency,
@@ -94,7 +98,7 @@ export async function createFlightCheckoutPaymentIntent(input: {
     throw new AppError(502, "Invalid payment intent from supplier.", "PAYMENT_INTENT_INVALID");
   }
 
-  await flightPaymentIntentRepository.create({
+  const persisted = await flightPaymentIntentRepository.create({
     duffel_intent_id: pit.id,
     offer_id: offer.id,
     charge_amount: breakdown.charge_amount,
@@ -110,6 +114,28 @@ export async function createFlightCheckoutPaymentIntent(input: {
     client_token: pit.client_token,
     idempotency_key: input.idempotencyKey,
   });
+
+  try {
+    await bookingFinancialEventRepository.record({
+      type: "intent_created",
+      flight_payment_intent_record_id: persisted.id,
+      amount: breakdown.charge_amount,
+      currency: breakdown.charge_currency,
+      payload: {
+        duffel_intent_id: pit.id,
+        offer_id: offer.id,
+        offer_total: breakdown.offer_total,
+        services_subtotal: priced.servicesSubtotal,
+        markup_amount: breakdown.markup_amount,
+        applied_pricing_rule_id: cfg.applied_rule_id,
+        applied_pricing_rule_name: cfg.applied_rule_name,
+        commission_percent_applied: cfg.commissionPercent,
+        markup_fixed_applied: cfg.markupFixed,
+      } as Prisma.InputJsonValue,
+    });
+  } catch {
+    // best-effort audit log
+  }
 
   return {
     idempotent_replay: false as const,
@@ -133,24 +159,3 @@ export async function createFlightCheckoutPaymentIntent(input: {
   };
 }
 
-export async function confirmFlightCheckoutPaymentIntent(duffelPaymentIntentId: string) {
-  if (!duffelPaymentIntentId.startsWith("pit_")) {
-    throw new AppError(400, "Invalid payment intent id.", "VALIDATION_ERROR");
-  }
-
-  const row = await flightPaymentIntentRepository.findByDuffelIntentId(duffelPaymentIntentId);
-  if (!row) {
-    throw new AppError(404, "Payment intent not found.", "NOT_FOUND");
-  }
-
-  const pit = await confirmDuffelPaymentIntent(duffelPaymentIntentId);
-  const status = pit.status || "unknown";
-  await flightPaymentIntentRepository.updateStatusByDuffelId(duffelPaymentIntentId, status);
-
-  return {
-    payment_intent_id: pit.id,
-    status,
-    amount: pit.amount,
-    currency: pit.currency,
-  };
-}

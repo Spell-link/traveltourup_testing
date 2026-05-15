@@ -48,7 +48,7 @@ const SpecialCard = () => {
           <div className="grid grid-cols-2 md:grid-cols-1 grid-rows-1 md:grid-rows-2 gap-4">
             <div className="relative group overflow-hidden rounded-xl">
               <Image
-                src="/images/assets/hotel1.jpg"
+                src="/images/categories/category1.jpg"
                 alt={imgAlt}
                 width={800}
                 height={600}
@@ -62,7 +62,7 @@ const SpecialCard = () => {
 
             <div className="relative group overflow-hidden rounded-xl">
               <Image
-                src="/images/assets/hotel2.jpg"
+                src="/images/categories/category2.jpg"
                 alt={imgAlt}
                 width={800}
                 height={600}
@@ -78,12 +78,13 @@ const SpecialCard = () => {
           {/* Center big image */}
           <div className="row-span-1 relative group overflow-hidden rounded-xl">
             <Image
-              src="/images/assets/hotel3.jpg"
+              src="/images/categories/category3.jpg"
               alt={imgAlt}
               width={800}
               height={600}
               className="h-full w-full object-cover rounded-xl transition-transform duration-300 group-hover:scale-110"
             />
+  
             <div className="absolute top-4 start-4 bg-black/40 backdrop-blur-sm text-white px-4 py-3 rounded-lg">
               <h3 className="font-semibold text-lg">{names.destIceland}</h3>
               <p className="text-sm">{priceFrom(2)}</p>
@@ -94,7 +95,7 @@ const SpecialCard = () => {
           <div className="grid grid-cols-2 md:grid-cols-1 grid-rows-1 md:grid-rows-2 gap-4">
             <div className="relative group overflow-hidden rounded-xl">
               <Image
-                src="/images/assets/hotel5.png"
+                src="/images/categories/category4.jpg"
                 alt={imgAlt}
                 width={800}
                 height={600}
@@ -108,7 +109,7 @@ const SpecialCard = () => {
 
             <div className="relative group overflow-hidden rounded-xl">
               <Image
-                src="/images/assets/hotel1.jpg"
+                src="/images/categories/category5.jpg"
                 alt={imgAlt}
                 width={800}
                 height={600}

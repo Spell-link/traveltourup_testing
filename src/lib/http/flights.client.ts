@@ -142,22 +142,6 @@ export async function postFlightPaymentIntent(
   });
 }
 
-export type FlightPaymentIntentConfirmResult = {
-  payment_intent_id: string;
-  status: string;
-  amount: string;
-  currency: string;
-};
-
-export async function postConfirmFlightPaymentIntent(
-  paymentIntentId: string,
-): Promise<FlightPaymentIntentConfirmResult> {
-  return apiJson<FlightPaymentIntentConfirmResult>(
-    `${FLIGHTS_V1_BASE}/payment-intents/${encodeURIComponent(paymentIntentId)}/confirm`,
-    { method: "POST" },
-  );
-}
-
 /** Create Duffel instant order after PaymentIntent succeeded (requires auth + `bookings:create`). */
 export async function postFlightBooking(
   body: FlightCheckoutBookingBody,
@@ -172,4 +156,51 @@ export async function postFlightBooking(
     body,
     headers,
   });
+}
+
+export type FlightBookingCancelAction = { action: "quote" } | { action: "confirm"; order_cancellation_id: string };
+
+export type FlightBookingCancelApiResult =
+  | {
+      action: "quote";
+      order_cancellation: Record<string, unknown>;
+    }
+  | {
+      action: "confirm";
+      order_cancellation: Record<string, unknown>;
+      booking: Record<string, unknown>;
+    };
+
+export async function postFlightBookingCancel(
+  bookingId: string,
+  body: FlightBookingCancelAction,
+): Promise<FlightBookingCancelApiResult> {
+  return apiJson<FlightBookingCancelApiResult>(
+    `${FLIGHTS_V1_BASE}/bookings/${encodeURIComponent(bookingId)}/cancel`,
+    { method: "POST", body },
+  );
+}
+
+export type FlightBookingCancelStatusResult = {
+  booking_id: string;
+  booking_status: string;
+  payment_status: string;
+  order_cancellation: Record<string, unknown> | null;
+  refund_attempt: Record<string, unknown> | null;
+};
+
+export async function getFlightBookingCancelStatus(bookingId: string): Promise<FlightBookingCancelStatusResult> {
+  return apiJson<FlightBookingCancelStatusResult>(
+    `${FLIGHTS_V1_BASE}/bookings/${encodeURIComponent(bookingId)}/cancel/status`,
+  );
+}
+
+export async function postFlightBookingRefundRetry(bookingId: string): Promise<{
+  refund: Record<string, unknown>;
+  booking: Record<string, unknown>;
+}> {
+  return apiJson<{ refund: Record<string, unknown>; booking: Record<string, unknown> }>(
+    `${FLIGHTS_V1_BASE}/bookings/${encodeURIComponent(bookingId)}/cancel/refund-retry`,
+    { method: "POST" },
+  );
 }

@@ -41,9 +41,21 @@ export async function apiJson<T>(
   }
 
   if (!res.ok) {
-    const o = parsed as { message?: string; issues?: unknown; code?: string };
+    const o = parsed as {
+      message?: string;
+      issues?: Array<{ message?: string; path?: Array<string | number> }>;
+      code?: string;
+    };
+    const issueMessages = o.issues
+      ?.map((issue) => {
+        if (!issue.message) return null;
+        if (!issue.path?.length) return issue.message;
+        return `${issue.path.join(".")}: ${issue.message}`;
+      })
+      .filter((message): message is string => Boolean(message));
     const msg =
       o.message ||
+      (issueMessages?.length ? issueMessages.join("; ") : null) ||
       (o.issues !== undefined ? JSON.stringify(o.issues) : null) ||
       `Request failed (${res.status})`;
     throw new Error(typeof msg === "string" ? msg : String(msg));

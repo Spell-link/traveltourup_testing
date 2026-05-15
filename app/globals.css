@@ -410,6 +410,7 @@ button{
   
 }
 
+
 /* Hero rotating word animation */
 @keyframes heroWordSlideIn {
   0% {
@@ -793,7 +794,6 @@ input.auth-input-autofill:-moz-autofill {
   transition: all 0.2s ease-in-out !important;
   box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1) !important;
 }
-
 
 
 /* dfserefe */

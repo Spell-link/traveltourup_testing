@@ -362,7 +362,7 @@
       "payNowOrHoldTitle": "ادفع الآن أو احجز مؤقتًا",
       "payNowOrHoldIntro": "الدفع الآن يؤكد الحجز فورًا مع شركة الطيران. الحجز المؤقت يحجز السعر بينما تنهي الترتيبات (عند تفعيل هذه الميزة لحسابك).",
       "payNowTitle": "ادفع الآن",
-      "payNowDescription": "ادفع بالبطاقة عبر Duffel. يُؤكَّد حجزك بعد نجاح الدفع.",
+      "payNowDescription": "ادفع بالبطاقة عبر Duffel (عبر Stripe). تُخصم بطاقتك عند إرسال الدفع هنا؛ نُكمل حجز شركة الطيران فقط بعد نجاح ذلك. إذا تعذّر التأكد من شركة الطيران، نبدأ استردادًا تلقائيًا عند الإمكان.",
       "holdOrderTitle": "طلب بالحجز المؤقت",
       "holdOrderDescription": "ضع حجزًا مؤقتًا دون خصم من بطاقتك. ادفع لاحقًا قبل انتهاء المهلة.",
       "holdDisabledHint": "إتمام الحجز المؤقت غير مفعّل بعد. عيّن FLIGHT_HOLD_BACKEND وNEXT_PUBLIC_FLIGHT_HOLD_BACKEND عندما يدعم حساب Duffel لديك طلبات الحجز المؤقت.",
@@ -424,7 +424,8 @@
       "errorCouldNotStartPayment": "تعذّر بدء الدفع",
       "errorCouldNotPlaceHold": "تعذّر وضع الحجز المؤقت",
       "errorBookingFailedAfterPayment": "فشل الحجز بعد الدفع",
-      "errorCardPaymentFailed": "فشل دفع البطاقة"
+      "errorCardPaymentFailed": "فشل دفع البطاقة",
+      "duffelPaymentsStripeHint": "عند الدفع، قد يتصل المتصفح بـ Stripe (معرّفات تبدأ بـ pi_…). هذا معالج بطاقة Duffel يضيف المبلغ قبل تأكيد التذكرة. مرجع الدفع لديك من Duffel يبدأ بـ pit_…. في لوحة Duffel، صفوف «Order» تعرض شراء التذكرة من الرصيد بعد ذلك—قد تظهر خصم البطاقة تحت المدفوعات أو في صف آخر وليس دائمًا في عمود Charge بجانب الطلب."
     },
     "results": {
       "searchFailed": "فشل البحث عن الرحلات",

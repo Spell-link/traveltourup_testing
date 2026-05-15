@@ -5,10 +5,12 @@ This document is the **authoritative implementation guide** for a **consumer-fac
 **Official references (read alongside this guide):**
 
 - [Choosing a payment method](https://duffel.com/docs/guides/choosing-a-payment-method)
-- [Collecting customer card payments](https://duffel.com/docs/guides/collecting-customer-card-payments) (PaymentIntent → confirm → balance → order)
+- [Collecting customer card payments](https://duffel.com/docs/guides/collecting-customer-card-payments) (PaymentIntent → collect → confirm → balance → order)
 - [Create a Payment Intent (API)](https://duffel.com/docs/api/payment-intents/create-payment-intent)
 - [Confirm a Payment Intent](https://duffel.com/docs/api/payment-intents/confirm-payment-intent)
 - [Create an order](https://duffel.com/docs/api/orders/create-order)
+
+**DevTools note:** Duffel’s `client_token` drives Stripe.js; a successful **`POST …/v1/payment_intents/pi_…/confirm`** in the browser is the **customer card charge / authorization path** for your Duffel `pit_…`. It is **not** a bug that `pi_…` ≠ `pit_…`—they are two ids for the same checkout leg. Your API and Duffel order metadata use **`pit_…`**.
 
 **Related repo docs:** [DUFFEL_KEYS_AND_CHECKOUT.md](./DUFFEL_KEYS_AND_CHECKOUT.md) (env vars, routes, troubleshooting). **Post-booking:** [Hold, cancel, exchanges & refunds](./FLIGHTS_STAYS_HOLD_CANCEL_REFUND_GUIDE.md).
 
@@ -42,21 +44,21 @@ sequenceDiagram
   D-->>API: pit_*, client_token
   API-->>U: client_token (+ pricing metadata)
   U->>U: DuffelPayments collects card
-  U->>API: Payment succeeded (client)
-  API->>D: POST .../payment_intents/{id}/actions/confirm
-  D-->>API: Balance topped up (net fees)
-  API->>D: POST /air/orders (instant, payments: balance)
-  D-->>API: Order confirmed (or error)
+  U->>API: POST /flights/bookings (Idempotency-Key)
+  API->>D: GET /payments/payment_intents/{id} then confirm if needed
+  D-->>API: Balance topped up when confirm runs
+  API->>D: POST /air/orders (instant, payments: balance, Idempotency-Key)
+  D-->>API: Order confirmed (or error then refund saga)
   API->>API: Persist Booking + link pit_*
-  API-->>U: Confirmation
+  API-->>U: Confirmation or saga error JSON
 ```
 
 **Invariants:**
 
 1. **One PaymentIntent per offer** you intend to book (Duffel recommendation).
-2. **Confirm** the PaymentIntent **only after** successful client-side collection.
-3. **Create the air order only after** the intent is in a **success** state in **your** records (and ideally re-fetch intent status if you retry).
-4. **Refresh the offer** (or rely on a fresh snapshot) immediately before order creation; **reject** if price or ancillary totals drift beyond policy.
+2. **Collect** card in the browser first (`DuffelPayments`); the server **must not** confirm the PaymentIntent until offer / extras / passenger checks pass (so the card is not charged for a checkout that will fail on `PRICE_CHANGED` or validation).
+3. **Confirm** the PaymentIntent in the **`POST .../bookings`** handler after those checks, then poll through **`processing`** until **`succeeded`** when needed; only then **`POST /air/orders`** with `payments: [{ type: "balance", ... }]`.
+4. **Refresh the offer** before capture and order; **reject** if price or ancillary totals drift beyond policy.
 
 ---
 
@@ -87,10 +89,10 @@ Typical route split (matches a solid BFF pattern):
 |------|--------|----------------|
 | Prepare checkout | `POST .../payment-intents` | Auth optional or required per risk; rate limit; validate body; refresh offer; validate ancillaries; compute breakdown; `POST` Duffel PaymentIntent; persist intent row. |
 | Collect card | Browser | `DuffelPayments` with `paymentIntentClientToken` from step 1. |
-| Confirm | `POST .../payment-intents/:id/confirm` | Rate limit; `confirm` on Duffel; update intent `status`. |
-| Book | `POST .../bookings` | **Require authenticated user** (or your chosen policy); enforce authz (`bookings:create`); verify intent **succeeded**, offer id + ancillaries **match** snapshot; refresh offer + price tolerance; `POST /air/orders` with `type: instant`, `payments: [{ type: balance, amount, currency }]`, passengers, services; persist booking; link intent → booking. |
+| Confirm (legacy) | `POST .../payment-intents/:id/confirm` | Optional; same as older clients. Instant checkout **does not require** this call. |
+| Book (instant) | `POST .../bookings` | **Require authenticated user**; enforce authz (`bookings:create`); validate offer / extras / passengers **before** capture; **GET** PaymentIntent, **confirm** if not yet succeeded, poll **`processing` → `succeeded`**, sync DB status; **`POST /air/orders`** with retries + **Duffel `Idempotency-Key`**; on order failure after payment, **`POST /payments/refunds`** + persist `order_failure_*`; persist booking + link `pit_*` on success. |
 
-**Idempotency:** Use **`Idempotency-Key`** headers on **booking** (and optionally PaymentIntent creation) so safe retries do not create duplicate tickets.
+**Idempotency:** Use **`Idempotency-Key`** headers on **booking** (and optionally PaymentIntent creation) so safe retries do not create duplicate tickets. The same value is forwarded to Duffel on **`POST /air/orders`** when present.
 
 **Rate limiting:** Apply per IP and/or per user on intent + confirm + booking to reduce abuse.
 
@@ -107,15 +109,18 @@ Typical route split (matches a solid BFF pattern):
 
 ## 6. Failure handling (distributed checkout)
 
-You **cannot** wrap “Duffel confirm + Duffel order + your DB” in a **single ACID transaction** across systems. Treat checkout as a **saga**:
+You **cannot** wrap “Duffel confirm + Duffel order + your DB” in a **single ACID transaction** across systems. Treat checkout as a **saga** with **compensation** (automatic refund when the air order cannot be placed after capture).
 
 | Failure | Practice |
 |---------|----------|
-| Order fails **after** PaymentIntent **confirmed** | Return a **stable error code** (e.g. `BOOKING_FAILED_AFTER_PAYMENT`) and include **`payment_intent_id`** for support. **Do not** promise automatic refund in-app unless you implement Duffel’s refund/compensation path. |
+| Order fails **after** PaymentIntent **confirmed** | Bounded **retries** on `POST /air/orders` for retryable upstream errors; then **`POST /payments/refunds`** for the stored `charge_amount` / `charge_currency`. Persist terminal outcome on **`flight_payment_intent_records`** (`order_failure_*`) so replays are safe. |
+| Refund accepted (pending or succeeded) | Return **`BOOKING_FAILED_REFUND_PENDING`** or **`BOOKING_FAILED_REFUNDED`** (HTTP 503) with `payment_intent_id` and optional `refund_id` / `refund_status`. |
+| Refund API fails after order failure | Fall back to **`BOOKING_FAILED_AFTER_PAYMENT`** with `payment_intent_id` / `support_reference` for manual ops. |
+| Same **`Idempotency-Key`** replay after terminal failure | Return the **same** terminal error payload (key stored on the intent row when the failure was recorded). |
 | Offer expired / price changed | Block order with **`PRICE_CHANGED`** (or 409); user must restart from search. **Do not** confirm a new intent for stale totals. |
 | Transient network errors on order | **Idempotent retry** of booking **only** when safe (same idempotency key, verify no order already exists for that intent). |
 
-**Operational:** Periodically reconcile **succeeded intents** with **no linked booking**; follow your finance runbook (manual order retry vs refund). See [DUFFEL_KEYS_AND_CHECKOUT.md § Ops / reconciliation](./DUFFEL_KEYS_AND_CHECKOUT.md).
+**Operational:** Periodically reconcile **succeeded intents** with **no linked booking** and **no terminal `order_failure_at`**; follow your finance runbook. See [DUFFEL_KEYS_AND_CHECKOUT.md § Ops / reconciliation](./DUFFEL_KEYS_AND_CHECKOUT.md).
 
 ---
 
@@ -142,8 +147,8 @@ You **may** still maintain a **small operational balance** for edge cases, refun
 
 - [ ] Test PaymentIntent creation with valid/invalid offer ids.
 - [ ] Test ancillary-only and seat+bag combinations; confirm mismatch with intent **rejects** booking.
-- [ ] Duffel test card flow end-to-end; confirm **confirm** then **order**.
-- [ ] Simulate **order** failure after **confirm**; verify error payload includes **`pit_...`**.
+- [ ] Duffel test card flow end-to-end; **single** `POST .../bookings` after card success (confirm runs server-side).
+- [ ] Simulate **order** failure after payment; verify **`BOOKING_FAILED_REFUND_PENDING`** / **`BOOKING_FAILED_AFTER_PAYMENT`** and **`pit_...`**; replay with same **`Idempotency-Key`** returns stable JSON.
 - [ ] Idempotent **double POST** on booking returns **same** booking.
 - [ ] Price drift beyond tolerance returns **PRICE_CHANGED**.
 
@@ -153,12 +158,12 @@ You **may** still maintain a **small operational balance** for edge cases, refun
 
 Current implementation follows this guide for **instant pay-now** flights:
 
-- Client: `src/components/flights/FlightCheckoutDuffel.tsx` (DuffelPayments, confirm, book).
+- Client: `src/components/flights/FlightCheckoutDuffel.tsx` (DuffelPayments, then **`POST .../bookings` only**).
 - PaymentIntent: `app/api/v1/flights/payment-intents/route.ts`, `src/lib/services/flights/flight-payment-intent.service.ts`.
-- Confirm: `app/api/v1/flights/payment-intents/[id]/confirm/route.ts`.
-- Booking + balance order: `app/api/v1/flights/bookings/route.ts`, `src/lib/services/flights/flights-booking.service.ts`.
+- Confirm (legacy): `app/api/v1/flights/payment-intents/[id]/confirm/route.ts`.
+- Booking saga: `app/api/v1/flights/bookings/route.ts`, `src/lib/services/flights/flights-booking.service.ts` (GET/confirm PaymentIntent, order retries + Duffel idempotency, compensating refund, terminal columns on `FlightPaymentIntentRecord`).
 - Pricing: `src/lib/payments/duffel-intent-pricing.ts`, `src/config/flight-payments.config.ts`.
-- Post-payment failure type: `BookingFailedAfterPaymentError` in `src/lib/api/errors.ts`.
+- Errors: `BookingFailedAfterPaymentError`, `BookingFailedRefundPendingError`, `BookingFailedRefundedError` in `src/lib/api/errors.ts` (+ `handleApiError` JSON fields).
 
 When you extend behaviour, **update this document** if the sequence or invariants change.
 
@@ -168,8 +173,8 @@ When you extend behaviour, **update this document** if the sequence or invariant
 
 - [ ] Duffel Payments **enabled** on organisation; test vs live keys separated.
 - [ ] Env: `FLIGHT_COMMISSION_PERCENT` / `FLIGHT_MARKUP_FIXED` / `DUFFEL_PAYMENTS_FEE_RATE` / `FLIGHT_PRICE_TOLERANCE_MAJOR` set with **documented** rationale.
-- [ ] Support runbook for **`BOOKING_FAILED_AFTER_PAYMENT`** and orphan `pit_*` rows.
-- [ ] Monitoring: alert on spikes in that error code.
+- [ ] Support runbook for **`BOOKING_FAILED_AFTER_PAYMENT`**, **`BOOKING_FAILED_REFUND_PENDING`**, **`BOOKING_FAILED_REFUNDED`**, and orphan `pit_*` rows (no booking, no `order_failure_at`).
+- [ ] Monitoring: alert on spikes in those error codes.
 - [ ] Legal/checkout disclosure reviewed.
 
 This file is the **recommended baseline** for flight payments on Duffel at early stage; evolve it as your contract and volume grow.

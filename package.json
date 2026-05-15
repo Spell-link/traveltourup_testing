@@ -29,7 +29,7 @@
     "db:seed-admin": "dotenv -e .env.local -- tsx prisma/seed/seed-super-admin.ts"
   },
   "dependencies": {
-    "@duffel/components": "^3.13.1",
+    "@duffel/components": "^3.16.1",
     "@prisma/adapter-pg": "^7.6.0",
     "@prisma/client": "^7.6.0",
     "@radix-ui/react-alert-dialog": "^1.1.15",

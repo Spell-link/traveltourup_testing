@@ -48,22 +48,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }
   }
 
-  let posts: { slug: string; updated_at: Date }[] = [];
+  let posts: { slug: string; updated_at: Date; locale: string }[] = [];
   try {
     posts = await blogRepository.findPublishedSlugRowsForSitemap();
   } catch {
     // DB unavailable (e.g. local without DB) — still emit static URLs.
   }
 
-  for (const locale of routing.locales) {
-    for (const post of posts) {
-      entries.push({
-        url: `${BASE_URL}/${locale}/blog/${post.slug}`,
-        lastModified: post.updated_at,
-        changeFrequency: "monthly",
-        priority: 0.64,
-      });
-    }
+  for (const post of posts) {
+    entries.push({
+      url: `${BASE_URL}/${post.locale}/blog/${post.slug}`,
+      lastModified: post.updated_at,
+      changeFrequency: "monthly",
+      priority: 0.64,
+    });
   }
 
   return entries;

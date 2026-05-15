@@ -3,9 +3,12 @@ import "server-only";
 /** When a booking is persisted and you have a guest email, call `sendEmail({ type: "booking_confirmation", ... })` from `@/lib/email` (or `POST /api/email/send` with `EMAIL_SERVER_SECRET`) to notify the traveler. */
 
 import { randomBytes } from "crypto";
+import type { FlightPaymentIntentRecord } from "@/generated/prisma";
 import { Prisma } from "@/generated/prisma";
 import {
   BookingFailedAfterPaymentError,
+  BookingFailedRefundedError,
+  BookingFailedRefundPendingError,
   AppError,
   PriceChangedError,
 } from "@/lib/api/errors";
@@ -17,9 +20,20 @@ import {
 } from "@/lib/duffel/order-parse";
 import { createOrder } from "@/lib/duffel/orders";
 import { DuffelApiError } from "@/lib/duffel/errors";
+import { createDuffelPaymentRefund } from "@/lib/duffel/refunds";
+import {
+  confirmDuffelPaymentIntent,
+  getDuffelPaymentIntent,
+} from "@/lib/duffel/payment-intents";
 import { bookingRepository } from "@/lib/db/repositories/booking.repository";
+import { bookingFinancialEventRepository } from "@/lib/db/repositories/booking-financial-event.repository";
 import { flightPaymentIntentRepository } from "@/lib/db/repositories/flight-payment-intent.repository";
 import { serializeBookingResponse } from "@/lib/services/booking.service";
+import type { BookingFinancialEventType } from "@/lib/constants/booking-states";
+import {
+  captureDuffelPaymentForInstantBooking,
+  FlightCaptureError,
+} from "@/lib/services/flights/flight-payment-capture.core";
 import {
   encodeAncillarySelection,
   parseAncillarySelectionJson,
@@ -35,6 +49,237 @@ function bookingRef(): string {
   const t = Date.now().toString(36);
   const r = randomBytes(4).toString("hex");
   return `TTU-${t}-${r}`.toUpperCase();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Best-effort financial-event log. Never throws — an audit-log failure must
+ * not break a booking saga (loss of an event row is recoverable, loss of a
+ * booking is not).
+ */
+async function logEvent(input: {
+  type: BookingFinancialEventType;
+  booking_id?: string | null;
+  flight_payment_intent_record_id?: string | null;
+  amount?: string | null;
+  currency?: string | null;
+  payload?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await bookingFinancialEventRepository.record({
+      type: input.type,
+      booking_id: input.booking_id ?? null,
+      flight_payment_intent_record_id: input.flight_payment_intent_record_id ?? null,
+      amount: input.amount ?? null,
+      currency: input.currency ?? null,
+      payload: (input.payload ?? null) as unknown as Prisma.InputJsonValue | null,
+    });
+  } catch {
+    // intentionally swallow
+  }
+}
+
+function throwTerminalCheckoutReplay(pit: FlightPaymentIntentRecord): never {
+  if (!pit.order_failure_at) {
+    throw new AppError(500, "Checkout replay invariant failed.", "INTERNAL_ERROR");
+  }
+  const refundSt = (pit.order_failure_refund_status ?? "").toLowerCase();
+  const code = pit.order_failure_code ?? "";
+  if (
+    code === "BOOKING_FAILED_REFUNDED" ||
+    refundSt === "succeeded" ||
+    refundSt === "completed"
+  ) {
+    throw new BookingFailedRefundedError(undefined, pit.duffel_intent_id, pit.order_failure_refund_id);
+  }
+  if (code === "BOOKING_FAILED_REFUND_PENDING") {
+    throw new BookingFailedRefundPendingError(
+      undefined,
+      pit.duffel_intent_id,
+      pit.order_failure_refund_id,
+      pit.order_failure_refund_status,
+    );
+  }
+  throw new BookingFailedAfterPaymentError(
+    "Payment was received but the airline could not confirm this booking. Please contact support with your payment reference.",
+    pit.duffel_intent_id,
+    pit.duffel_intent_id,
+  );
+}
+
+function isDuffelAlreadyConfirmedError(e: unknown): boolean {
+  if (!(e instanceof DuffelApiError)) return false;
+  const codes = ["payment_intent_already_confirmed", "validation_required"];
+  if (codes.some((c) => e.hasDuffelErrorCode(c))) return true;
+  const msg = (e.clientMessage ?? "").toLowerCase();
+  return msg.includes("already") && msg.includes("confirm");
+}
+
+/**
+ * Server-side capture of the Duffel PaymentIntent. Per Duffel docs the
+ * frontend card collection ONLY tokenises the card; the actual sweep of funds
+ * to our Duffel balance (and the Payment row in the dashboard) requires this
+ * server-side confirm. We delegate to a pure-function core for testability
+ * and translate its `FlightCaptureError` into our `AppError` hierarchy.
+ */
+async function ensureDuffelPaymentCapturedForInstantBooking(pit: {
+  duffel_intent_id: string;
+  status: string;
+}): Promise<{
+  confirmed_at: string | null;
+  called_confirm: boolean;
+  poll_attempts: number;
+  final_status: string;
+}> {
+  try {
+    const r = await captureDuffelPaymentForInstantBooking(pit, {
+      confirm: confirmDuffelPaymentIntent,
+      get: getDuffelPaymentIntent,
+      persistStatus: async (id, status) => {
+        await flightPaymentIntentRepository.updateStatusByDuffelId(id, status);
+      },
+      sleep,
+      isAlreadyConfirmedError: isDuffelAlreadyConfirmedError,
+      asDuffelError: (e) => (e instanceof DuffelApiError ? e : null),
+    });
+    return {
+      confirmed_at: r.confirmed_at,
+      called_confirm: r.called_confirm,
+      poll_attempts: r.poll_attempts,
+      final_status: r.status,
+    };
+  } catch (e) {
+    if (e instanceof FlightCaptureError) {
+      const httpStatus =
+        e.info.code === "PAYMENT_NOT_CAPTURED" ? 502 : 400;
+      throw new AppError(httpStatus, e.info.message, e.info.code);
+    }
+    throw e;
+  }
+}
+
+async function createDuffelOrderWithRetries(
+  orderBody: Record<string, unknown>,
+  idempotencyKey: string | null,
+): Promise<unknown> {
+  const max = 3;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < max; attempt++) {
+    try {
+      return await createOrder(orderBody, idempotencyKey);
+    } catch (e) {
+      lastErr = e;
+      if (e instanceof DuffelApiError && e.retryable && attempt < max - 1) {
+        await sleep(400 * (attempt + 1));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
+async function failInstantBookingAfterPaymentCaptured(input: {
+  pit: FlightPaymentIntentRecord;
+  bookingIdempotencyKey: string | null;
+}): Promise<never> {
+  const { pit, bookingIdempotencyKey } = input;
+  if (pit.order_failure_at) {
+    throwTerminalCheckoutReplay(pit);
+  }
+
+  let refundId: string | null = null;
+  let refundStatus: string | null = null;
+  let terminalCode: "BOOKING_FAILED_REFUND_PENDING" | "BOOKING_FAILED_REFUNDED" | "BOOKING_FAILED_AFTER_PAYMENT" =
+    "BOOKING_FAILED_AFTER_PAYMENT";
+
+  try {
+    const refund = await createDuffelPaymentRefund({
+      payment_intent_id: pit.duffel_intent_id,
+      amount: pit.charge_amount,
+      currency: pit.charge_currency,
+    });
+    refundId = refund.id;
+    refundStatus = refund.status ?? "pending";
+    const rs = (refundStatus ?? "").toLowerCase();
+    if (rs === "succeeded" || rs === "completed") {
+      terminalCode = "BOOKING_FAILED_REFUNDED";
+    } else {
+      terminalCode = "BOOKING_FAILED_REFUND_PENDING";
+    }
+  } catch {
+    terminalCode = "BOOKING_FAILED_AFTER_PAYMENT";
+    refundId = null;
+    refundStatus = null;
+  }
+
+  await flightPaymentIntentRepository.recordTerminalOrderFailure({
+    duffel_intent_id: pit.duffel_intent_id,
+    order_failure_booking_idempotency_key: bookingIdempotencyKey,
+    order_failure_code: terminalCode,
+    order_failure_refund_id: refundId,
+    order_failure_refund_status: refundStatus,
+  });
+
+  await logEvent({
+    type: "order_failed",
+    flight_payment_intent_record_id: pit.id,
+    booking_id: pit.booking_id,
+    amount: pit.charge_amount,
+    currency: pit.charge_currency,
+    payload: {
+      duffel_intent_id: pit.duffel_intent_id,
+      terminal_code: terminalCode,
+    },
+  });
+  if (refundId) {
+    await logEvent({
+      type: "refund_initiated",
+      flight_payment_intent_record_id: pit.id,
+      booking_id: pit.booking_id,
+      amount: pit.charge_amount,
+      currency: pit.charge_currency,
+      payload: {
+        duffel_refund_id: refundId,
+        refund_status: refundStatus,
+        duffel_intent_id: pit.duffel_intent_id,
+      },
+    });
+    if (terminalCode === "BOOKING_FAILED_REFUNDED") {
+      await logEvent({
+        type: "refund_succeeded",
+        flight_payment_intent_record_id: pit.id,
+        booking_id: pit.booking_id,
+        amount: pit.charge_amount,
+        currency: pit.charge_currency,
+        payload: { duffel_refund_id: refundId },
+      });
+    }
+  } else {
+    await logEvent({
+      type: "refund_failed",
+      flight_payment_intent_record_id: pit.id,
+      booking_id: pit.booking_id,
+      amount: pit.charge_amount,
+      currency: pit.charge_currency,
+      payload: { duffel_intent_id: pit.duffel_intent_id },
+    });
+  }
+
+  if (terminalCode === "BOOKING_FAILED_REFUNDED") {
+    throw new BookingFailedRefundedError(undefined, pit.duffel_intent_id, refundId);
+  }
+  if (terminalCode === "BOOKING_FAILED_REFUND_PENDING") {
+    throw new BookingFailedRefundPendingError(undefined, pit.duffel_intent_id, refundId, refundStatus);
+  }
+  throw new BookingFailedAfterPaymentError(
+    "Payment was received but the airline could not confirm this booking. Please contact support with your payment reference.",
+    pit.duffel_intent_id,
+    pit.duffel_intent_id,
+  );
 }
 
 function toDuffelOrderPassengers(passengers: FlightCheckoutBookingBody["passengers"]) {
@@ -76,6 +321,22 @@ export async function createDuffelInstantFlightBooking(input: {
     throw new AppError(400, "Missing payment intent.", "VALIDATION_ERROR");
   }
 
+  if (input.idempotencyKey) {
+    const byFail = await flightPaymentIntentRepository.findByOrderFailureBookingIdempotencyKey(
+      input.idempotencyKey,
+    );
+    if (byFail?.order_failure_at && !byFail.booking_id) {
+      if (byFail.duffel_intent_id !== pitId) {
+        throw new AppError(
+          409,
+          "Idempotency-Key does not match this payment session.",
+          "IDEMPOTENCY_MISMATCH",
+        );
+      }
+      throwTerminalCheckoutReplay(byFail);
+    }
+  }
+
   const pit = await flightPaymentIntentRepository.findByDuffelIntentId(pitId);
   if (!pit) {
     throw new AppError(400, "Unknown payment intent. Start checkout again.", "VALIDATION_ERROR");
@@ -87,12 +348,19 @@ export async function createDuffelInstantFlightBooking(input: {
     const existingBooking = await bookingRepository.findById(pit.booking_id);
     if (existingBooking) return serializeBookingResponse(existingBooking);
   }
-
-  const statusNorm = pit.status.toLowerCase();
-  if (statusNorm !== "succeeded") {
-    throw new AppError(400, "Payment is not complete.", "PAYMENT_INCOMPLETE");
+  if (pit.order_failure_at && !pit.booking_id) {
+    throwTerminalCheckoutReplay(pit);
   }
 
+  /**
+   * Instant pay-now ordering (Duffel best practice):
+   * 1) Validate offer, extras, and passengers **before** capturing the card — avoids charging then failing on PRICE_CHANGED.
+   * 2) Confirm PaymentIntent server-side (customer card → our Duffel Balance).
+   *    This is the step that creates the Payment row in the Duffel dashboard;
+   *    we never short-circuit it on a stale local/remote status.
+   * 3) Create air order with `payments: [{ type: "balance" }]` (Balance → airline).
+   * True ACID across Duffel + airline is impossible; if step 3 fails we compensate with refund (see `failInstantBookingAfterPaymentCaptured`).
+   */
   const pitSel = encodeAncillarySelection(parseAncillarySelectionJson(pit.ancillary_selection));
   const bodySel = encodeAncillarySelection(input.body.services);
   if (pitSel !== bodySel) {
@@ -132,6 +400,22 @@ export async function createDuffelInstantFlightBooking(input: {
 
   assertPassengersMatchOffer(offer, input.body.passengers);
 
+  const capture = await ensureDuffelPaymentCapturedForInstantBooking(pit);
+  await logEvent({
+    type: "intent_succeeded",
+    flight_payment_intent_record_id: pit.id,
+    amount: pit.charge_amount,
+    currency: pit.charge_currency,
+    payload: {
+      duffel_intent_id: pit.duffel_intent_id,
+      offer_id: offer.id,
+      confirmed_at: capture.confirmed_at,
+      called_confirm: capture.called_confirm,
+      poll_attempts: capture.poll_attempts,
+      final_status: capture.final_status,
+    },
+  });
+
   const orderTotal = (refreshed + nowSvc).toFixed(2);
 
   const orderBody: Record<string, unknown> = {
@@ -151,21 +435,36 @@ export async function createDuffelInstantFlightBooking(input: {
     orderBody.services = priced.orderServices;
   }
 
+  /**
+   * Anything thrown between here and successful booking persistence happens
+   * AFTER the customer's card was captured. The saga must compensate for ALL
+   * failures, not only `DuffelApiError`, otherwise the customer's money sits
+   * with us while no order exists. The `failInstantBookingAfterPaymentCaptured`
+   * helper persists a terminal failure (idempotent) and triggers Duffel
+   * refunds, so a retry with the same Idempotency-Key returns the same
+   * terminal error code.
+   */
   let raw: unknown;
   try {
-    raw = await createOrder(orderBody);
+    raw = await createDuffelOrderWithRetries(orderBody, input.idempotencyKey);
   } catch (e) {
-    if (e instanceof DuffelApiError) {
-      throw new BookingFailedAfterPaymentError(
-        "Payment was received but the airline could not confirm this booking. Please contact support with your payment reference.",
-        pit.duffel_intent_id,
-        pit.duffel_intent_id,
-      );
-    }
+    await failInstantBookingAfterPaymentCaptured({
+      pit,
+      bookingIdempotencyKey: input.idempotencyKey,
+    });
     throw e;
   }
 
-  const parsed = parseDuffelOrderResponse(raw);
+  let parsed: ReturnType<typeof parseDuffelOrderResponse>;
+  try {
+    parsed = parseDuffelOrderResponse(raw);
+  } catch (e) {
+    await failInstantBookingAfterPaymentCaptured({
+      pit,
+      bookingIdempotencyKey: input.idempotencyKey,
+    });
+    throw e;
+  }
   const expiresAt = offer.expires_at ? new Date(offer.expires_at) : null;
   const ancillaries = parseDuffelOrderServicesForDb(parsed.data);
 
@@ -199,6 +498,20 @@ export async function createDuffelInstantFlightBooking(input: {
       offer_expires_at: expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null,
       itinerary_snapshot: offer as unknown as Prisma.InputJsonValue,
       order_raw: parsed.data as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  await logEvent({
+    type: "order_placed",
+    booking_id: row.id,
+    flight_payment_intent_record_id: pit.id,
+    amount: parsed.totalAmount,
+    currency: parsed.totalCurrency,
+    payload: {
+      duffel_order_id: parsed.orderId,
+      duffel_offer_id: offer.id,
+      duffel_intent_id: pit.duffel_intent_id,
+      booking_reference: parsed.bookingReference,
     },
   });
 
@@ -251,7 +564,7 @@ export async function createDuffelHoldFlightBooking(input: {
 
   let raw: unknown;
   try {
-    raw = await createOrder(orderBody);
+    raw = await createOrder(orderBody, input.idempotencyKey);
   } catch (e) {
     if (e instanceof DuffelApiError) {
       throw new AppError(

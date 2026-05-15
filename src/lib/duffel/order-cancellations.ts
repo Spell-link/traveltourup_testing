@@ -9,10 +9,10 @@ export function createOrderCancellation(orderId: string) {
   });
 }
 
-/** `POST /air/order_cancellations/:id/actions/confirm` */
+/** `POST /air/order_cancellations/:id/actions/confirm` — JSON:API envelope `{ data: {} }`. */
 export function confirmOrderCancellation(duffelCancellationId: string) {
   return duffelFetch<unknown>(
     `/air/order_cancellations/${encodeURIComponent(duffelCancellationId)}/actions/confirm`,
-    { method: "POST", body: JSON.stringify({}) },
+    { method: "POST", body: JSON.stringify({ data: {} }) },
   );
 }

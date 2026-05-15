@@ -10,6 +10,9 @@ import {
   bookingTypeLabel,
 } from "@/lib/bookings/booking-summary";
 import { getBooking } from "@/lib/http/bookings.client";
+import { FlightBookingCancelPanel } from "@/components/bookings/FlightBookingCancelPanel";
+import { FlightBookingChangePanel } from "@/components/bookings/FlightBookingChangePanel";
+import { FlightFinancialTimelinePanel } from "@/components/bookings/FlightFinancialTimelinePanel";
 import { useLocale } from "next-intl";
 import { useCurrency } from "@/components/providers/CurrencyProvider";
 
@@ -387,6 +390,29 @@ export function BookingDetailView({ bookingId }: { bookingId: string }) {
       </div>
 
       {row.flight_booking ? <FlightSections fb={row.flight_booking} /> : null}
+      {row.type === "flight" && row.flight_booking ? (
+        <>
+          <FlightBookingCancelPanel
+            bookingId={row.id}
+            status={row.status}
+            paymentStatus={row.payment_status}
+            hasDuffelOrder={Boolean(row.flight_booking.duffel_order_id)}
+            onBookingRefresh={async () => {
+              const b = await getBooking(bookingId);
+              setRow(b);
+            }}
+          />
+          <FlightBookingChangePanel
+            bookingId={row.id}
+            bookingStatus={row.status}
+            onChangeConfirmed={async () => {
+              const b = await getBooking(bookingId);
+              setRow(b);
+            }}
+          />
+          <FlightFinancialTimelinePanel bookingId={row.id} />
+        </>
+      ) : null}
       {row.hotel_booking ? <HotelSections hb={row.hotel_booking} /> : null}
       {row.car_booking ? <CarSections cb={row.car_booking} /> : null}
       {row.guest_data ? <GuestDetails guest={row.guest_data} /> : null}

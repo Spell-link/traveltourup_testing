@@ -16,6 +16,19 @@ export const flightPaymentIntentRepository = {
     });
   },
 
+  findByOrderFailureBookingIdempotencyKey(key: string) {
+    return prisma.flightPaymentIntentRecord.findUnique({
+      where: { order_failure_booking_idempotency_key: key },
+    });
+  },
+
+  findFirstByBookingId(bookingId: string) {
+    return prisma.flightPaymentIntentRecord.findFirst({
+      where: { booking_id: bookingId },
+      orderBy: { created_at: "desc" },
+    });
+  },
+
   async create(input: {
     duffel_intent_id: string;
     offer_id: string;
@@ -44,6 +57,25 @@ export const flightPaymentIntentRepository = {
     return prisma.flightPaymentIntentRecord.update({
       where: { duffel_intent_id: duffelIntentId },
       data: { booking_id: bookingId },
+    });
+  },
+
+  async recordTerminalOrderFailure(input: {
+    duffel_intent_id: string;
+    order_failure_booking_idempotency_key: string | null;
+    order_failure_code: string;
+    order_failure_refund_id: string | null;
+    order_failure_refund_status: string | null;
+  }) {
+    return prisma.flightPaymentIntentRecord.update({
+      where: { duffel_intent_id: input.duffel_intent_id },
+      data: {
+        order_failure_at: new Date(),
+        order_failure_booking_idempotency_key: input.order_failure_booking_idempotency_key,
+        order_failure_code: input.order_failure_code,
+        order_failure_refund_id: input.order_failure_refund_id,
+        order_failure_refund_status: input.order_failure_refund_status,
+      },
     });
   },
 };

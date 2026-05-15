@@ -2,7 +2,14 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { ForbiddenError, UnauthorizedError } from "@/lib/authz/errors";
 import { DuffelApiError } from "@/lib/duffel/errors";
-import { AppError, BookingFailedAfterPaymentError, ConflictError, ValidationError } from "./errors";
+import {
+  AppError,
+  BookingFailedAfterPaymentError,
+  BookingFailedRefundedError,
+  BookingFailedRefundPendingError,
+  ConflictError,
+  ValidationError,
+} from "./errors";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -69,6 +76,43 @@ export function handleApiError(error: unknown) {
           : {}),
         ...(error.paymentIntentId != null && error.paymentIntentId !== ""
           ? { payment_intent_id: error.paymentIntentId }
+          : {}),
+      },
+      { status: error.statusCode },
+    );
+  }
+
+  if (error instanceof BookingFailedRefundPendingError) {
+    return NextResponse.json(
+      {
+        success: false as const,
+        code: error.code,
+        message: error.message,
+        ...(error.paymentIntentId != null && error.paymentIntentId !== ""
+          ? { payment_intent_id: error.paymentIntentId }
+          : {}),
+        ...(error.refundId != null && error.refundId !== ""
+          ? { refund_id: error.refundId }
+          : {}),
+        ...(error.refundStatus != null && error.refundStatus !== ""
+          ? { refund_status: error.refundStatus }
+          : {}),
+      },
+      { status: error.statusCode },
+    );
+  }
+
+  if (error instanceof BookingFailedRefundedError) {
+    return NextResponse.json(
+      {
+        success: false as const,
+        code: error.code,
+        message: error.message,
+        ...(error.paymentIntentId != null && error.paymentIntentId !== ""
+          ? { payment_intent_id: error.paymentIntentId }
+          : {}),
+        ...(error.refundId != null && error.refundId !== ""
+          ? { refund_id: error.refundId }
           : {}),
       },
       { status: error.statusCode },

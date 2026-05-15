@@ -20,8 +20,14 @@ Related env vars: see [`.env.example`](../../.env.example) (`DUFFEL_API_URL`, op
 
 Official guide: [Collecting customer card payments](https://duffel.com/docs/guides/collecting-customer-card-payments).
 
-- **No Stripe secret keys** are required in this app for the Duffel card flow; Duffel issues a **PaymentIntent** and the **`@duffel/components`** `DuffelPayments` UI uses the **`client_token`** from your backend.
+- **No Stripe secret keys** are required in this app for the Duffel card flow; Duffel issues a **PaymentIntent** (`pit_…`) and the **`@duffel/components`** `DuffelPayments` UI uses the **`client_token`** from your backend. That token embeds a **Stripe** PaymentIntent (`pi_…`): the browser’s `POST https://api.stripe.com/v1/payment_intents/pi_…/confirm` call is **expected**—it is how Duffel collects the card. Your app stores and reconciles the Duffel id `pit_…` (e.g. in `guest_data.payment_intent_id`).
 - **Eligibility**: Duffel Payments is limited to certain regions; confirm in the dashboard if `/payments/payment_intents` errors.
+
+### Balance “Transactions” vs card charge in the Duffel dashboard
+
+Duffel’s model is: **card → top up your Duffel Balance** (via the `pit_…` flow), then **`POST /air/orders`** with `payments: [{ type: "balance", … }]` **debits** that balance for the ticket. The **Transactions** table often highlights **Order** rows (balance out). The **card inflow** may appear as a different transaction type or under **Payments** / another view—an empty **Charge** cell on an Order row does **not** mean the customer was not charged; it usually means that row is the **balance debit for the ticket**, not the card line item.
+
+If booking fails after capture, the app attempts **`POST /payments/refunds`** (see flight booking saga); true “void the card authorization only if order fails” is only possible if Duffel exposes a delayed-capture flow for your account—ask Duffel support if you need that product shape.
 - **Test card** (from Duffel docs): `4242 4242 4242 4242`, any future expiry, any CVC.
 
 ## App routes (reference)
@@ -29,9 +35,9 @@ Official guide: [Collecting customer card payments](https://duffel.com/docs/guid
 | Step | Endpoint / page |
 |------|------------------|
 | Create PaymentIntent | `POST /api/v1/flights/payment-intents` `{ "offer_id" }` |
-| Collect card | `/flights/payment?offer_id=…` (Duffel component) |
-| Confirm intent | `POST /api/v1/flights/payment-intents/pit_…/confirm` |
-| Create order + local booking | `POST /api/v1/flights/bookings` (auth + `bookings:create`) |
+| Collect card | `/flights/payment?offer_id=…` (Duffel component — may call Stripe `pi_…/confirm` in the browser) |
+| Confirm intent (legacy) | `POST /api/v1/flights/payment-intents/pit_…/confirm` (optional; instant checkout confirms inside `POST /bookings`) |
+| Create order + local booking | `POST /api/v1/flights/bookings` (auth + `bookings:create`; validates offer **before** capture, then confirm `pit_…`, then `POST /air/orders`; refund saga on order failure) |
 | Cancel flight (Duffel quote / confirm) | `POST /api/v1/flights/bookings/:bookingId/cancel` (auth + `bookings:cancel_own` or `bookings:manage`) |
 
 ### Commission / pricing env

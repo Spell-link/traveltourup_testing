@@ -3,13 +3,20 @@ import "server-only";
 import { cache } from "react";
 
 import { NotFoundError } from "@/lib/api/errors";
-import type { BlogPostDto, BlogPostImageDto } from "@/lib/blog/blog.types";
+import type {
+  BlogCategoryOptionDto,
+  BlogPostAdminDto,
+  BlogPostDto,
+  BlogPostImageDto,
+  BlogPostTranslationDto,
+} from "@/lib/blog/blog.types";
 import {
   blogRepository,
   type BlogPostRow,
   type BlogPostOrderByInput,
   type BlogPostWhereInput,
 } from "@/lib/db/repositories/blog.repository";
+import { defaultLocale, locales, type AppLocale } from "@/i18n/routing";
 import {
   blogAdminListQuerySchema,
   blogPublicListQuerySchema,
@@ -19,9 +26,8 @@ import type { z } from "zod";
 type AdminListQuery = z.infer<typeof blogAdminListQuerySchema>;
 type PublicListQuery = z.infer<typeof blogPublicListQuerySchema>;
 
-// ---------------------------------------------------------------------------
-// Mapper — DB row (snake_case) → DTO (camelCase)
-// ---------------------------------------------------------------------------
+type BlogTranslationRow = BlogPostRow["translations"][number];
+type BlogCategoryTranslationRow = BlogPostRow["category"]["translations"][number];
 
 function authorDisplayName(row: BlogPostRow): { id: string; name: string } {
   if (!row.author) {
@@ -34,12 +40,36 @@ function authorDisplayName(row: BlogPostRow): { id: string; name: string } {
   };
 }
 
-function mapImages(row: BlogPostRow): BlogPostImageDto[] {
+function translationByLocale(
+  translations: BlogTranslationRow[],
+  locale: AppLocale,
+): BlogTranslationRow | undefined {
+  return translations.find((translation) => translation.locale === locale);
+}
+
+function resolveCategoryName(
+  translations: BlogCategoryTranslationRow[],
+  locale: AppLocale,
+): string {
+  const localized = translations.find((translation) => translation.locale === locale);
+  const english = translations.find((translation) => translation.locale === defaultLocale);
+  return localized?.name ?? english?.name ?? translations[0]?.name ?? "Category";
+}
+
+function parseImageAlts(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    ([, alt]) => typeof alt === "string" && alt.trim().length > 0,
+  );
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
+function mapImages(row: BlogPostRow, imageAlts: Record<string, string>): BlogPostImageDto[] {
   const images = row.images ?? [];
   return images.map((img) => ({
     id: img.id,
     url: img.url,
-    alt: img.alt,
+    alt: imageAlts[img.id] ?? "",
     sortOrder: img.sort_order,
     isFeatured: img.is_featured,
     storagePath: img.storage_path,
@@ -54,22 +84,63 @@ function deriveCoverFromImages(images: BlogPostImageDto[]): { image: string; ima
   };
 }
 
-export function mapRowToDto(row: BlogPostRow): BlogPostDto {
-  const publishedAt = row.published_at ?? row.created_at;
-  const images = mapImages(row);
-  const { image, imageAlt } = deriveCoverFromImages(images);
+function pickTranslation(
+  translations: BlogTranslationRow[],
+  locale: AppLocale,
+): BlogTranslationRow | undefined {
+  const localized = translationByLocale(translations, locale);
+  if (localized) return localized;
+  return translationByLocale(translations, defaultLocale);
+}
+
+function mapTranslationDto(row: BlogTranslationRow): BlogPostTranslationDto {
   return {
-    id: row.id,
+    locale: row.locale as AppLocale,
     title: row.title,
     slug: row.slug,
     content: row.content,
     excerpt: row.excerpt,
+    imageAlts: parseImageAlts(row.image_alts),
+    seo: {
+      metaTitle: row.meta_title ?? row.title,
+      metaDescription: row.meta_description ?? row.excerpt,
+      focusKeyphrase: row.focus_keyphrase ?? null,
+      canonicalUrl: row.canonical_url ?? null,
+    },
+  };
+}
+
+export function resolveBlogPostDto(row: BlogPostRow, locale: AppLocale = defaultLocale): BlogPostDto {
+  const english = translationByLocale(row.translations, defaultLocale);
+  const active = pickTranslation(row.translations, locale) ?? english;
+  if (!active || !english) {
+    throw new NotFoundError("Blog post translation");
+  }
+
+  const imageAlts = {
+    ...parseImageAlts(english.image_alts),
+    ...parseImageAlts(active.image_alts),
+  };
+  const images = mapImages(row, imageAlts);
+  const { image, imageAlt } = deriveCoverFromImages(images);
+  const publishedAt = row.published_at ?? row.created_at;
+  const availableLocales = row.translations.map((translation) => translation.locale as AppLocale);
+  const alternateSlugs = Object.fromEntries(
+    row.translations.map((translation) => [translation.locale as AppLocale, translation.slug]),
+  ) as Partial<Record<AppLocale, string>>;
+
+  return {
+    id: row.id,
+    title: active.title || english.title,
+    slug: active.slug || english.slug,
+    content: active.content || english.content,
+    excerpt: active.excerpt || english.excerpt,
     images,
     image,
     imageAlt,
     category: {
       id: row.category.id,
-      name: row.category.name,
+      name: resolveCategoryName(row.category.translations, locale),
       slug: row.category.slug,
     },
     author: authorDisplayName(row),
@@ -81,15 +152,37 @@ export function mapRowToDto(row: BlogPostRow): BlogPostDto {
     viewsCount: row.views_count,
     readTime: row.read_time,
     seo: {
-      metaTitle: row.meta_title ?? row.title,
-      metaDescription: row.meta_description ?? row.excerpt,
+      metaTitle: active.meta_title ?? active.title ?? english.meta_title ?? english.title,
+      metaDescription:
+        active.meta_description ?? active.excerpt ?? english.meta_description ?? english.excerpt,
+      focusKeyphrase: active.focus_keyphrase ?? english.focus_keyphrase ?? null,
+      canonicalUrl: active.canonical_url ?? english.canonical_url ?? null,
+      robotsMeta: row.robots_meta ?? "index,follow",
     },
+    locale,
+    availableLocales,
+    alternateSlugs,
   };
 }
 
-// ---------------------------------------------------------------------------
-// Admin CRUD
-// ---------------------------------------------------------------------------
+export function mapRowToAdminDto(row: BlogPostRow): BlogPostAdminDto {
+  const base = resolveBlogPostDto(row, defaultLocale);
+  const translations = Object.fromEntries(
+    locales.map((locale) => {
+      const translation = translationByLocale(row.translations, locale);
+      return [locale, translation ? mapTranslationDto(translation) : null];
+    }),
+  ) as Record<AppLocale, BlogPostTranslationDto | null>;
+
+  return {
+    ...base,
+    translations,
+  };
+}
+
+export function mapRowToDto(row: BlogPostRow, locale: AppLocale = defaultLocale): BlogPostDto {
+  return resolveBlogPostDto(row, locale);
+}
 
 const idAsc = { id: "asc" as const };
 
@@ -100,13 +193,12 @@ function listOrderBy(query: AdminListQuery): BlogPostOrderByInput {
   }
   switch (query.sort) {
     case "title":
-      return [{ title: dir }, idAsc];
     case "slug":
-      return [{ slug: dir }, idAsc];
+      return [{ updated_at: "desc" }, idAsc];
     case "status":
       return [{ status: dir }, idAsc];
     case "category":
-      return [{ category: { name: dir } }, idAsc];
+      return [{ category: { slug: dir } }, idAsc];
     case "updated":
       return [{ updated_at: dir }, idAsc];
     default:
@@ -123,11 +215,16 @@ export async function listAdminBlogPosts(query: AdminListQuery): Promise<{
     ...(query.category_id ? { category_id: query.category_id } : {}),
     ...(query.q
       ? {
-          OR: [
-            { title: { contains: query.q, mode: "insensitive" } },
-            { slug: { contains: query.q, mode: "insensitive" } },
-            { excerpt: { contains: query.q, mode: "insensitive" } },
-          ],
+          translations: {
+            some: {
+              locale: defaultLocale,
+              OR: [
+                { title: { contains: query.q, mode: "insensitive" } },
+                { slug: { contains: query.q, mode: "insensitive" } },
+                { excerpt: { contains: query.q, mode: "insensitive" } },
+              ],
+            },
+          },
         }
       : {}),
   };
@@ -138,16 +235,18 @@ export async function listAdminBlogPosts(query: AdminListQuery): Promise<{
     skip,
     take: query.limit,
     orderBy: listOrderBy(query),
+    sort: query.sort === "title" || query.sort === "slug" ? query.sort : undefined,
+    order: query.order,
   });
-  return { items: rows.map(mapRowToDto), total };
+  return { items: rows.map((row) => mapRowToDto(row, defaultLocale)), total };
 }
 
-export async function getAdminBlogPost(id: string): Promise<BlogPostDto> {
+export async function getAdminBlogPost(id: string): Promise<BlogPostAdminDto> {
   const row = await blogRepository.findByIdAdmin(id);
   if (!row) {
     throw new NotFoundError("Blog post");
   }
-  return mapRowToDto(row);
+  return mapRowToAdminDto(row);
 }
 
 export function buildPublishedAt(
@@ -168,23 +267,25 @@ export async function deleteAdminBlogPost(id: string): Promise<void> {
   await blogRepository.delete(id);
 }
 
-// ---------------------------------------------------------------------------
-// Public / marketing
-// ---------------------------------------------------------------------------
-
 export async function listPublicBlogPosts(query: PublicListQuery): Promise<{
   items: BlogPostDto[];
   total: number;
   page: number;
   limit: number;
 }> {
+  const locale = query.locale ?? defaultLocale;
   const extraWhere: BlogPostWhereInput = {
     ...(query.q
       ? {
-          OR: [
-            { title: { contains: query.q, mode: "insensitive" } },
-            { excerpt: { contains: query.q, mode: "insensitive" } },
-          ],
+          translations: {
+            some: {
+              locale,
+              OR: [
+                { title: { contains: query.q, mode: "insensitive" } },
+                { excerpt: { contains: query.q, mode: "insensitive" } },
+              ],
+            },
+          },
         }
       : {}),
     ...(query.category_slug
@@ -197,53 +298,60 @@ export async function listPublicBlogPosts(query: PublicListQuery): Promise<{
     where: extraWhere,
     skip,
     take: query.limit,
+    locale,
   });
 
   return {
-    items: rows.map(mapRowToDto),
+    items: rows.map((row) => mapRowToDto(row, locale)),
     total,
     page: query.page,
     limit: query.limit,
   };
 }
 
-export async function getPublicBlogPostBySlug(slug: string): Promise<BlogPostDto> {
-  const row = await blogRepository.findPublishedBySlug(slug);
+export async function getPublicBlogPostBySlug(
+  slug: string,
+  locale: AppLocale = defaultLocale,
+): Promise<BlogPostDto> {
+  const row = await blogRepository.findPublishedByLocaleSlug(locale, slug);
   if (!row) {
     throw new NotFoundError("Blog post");
   }
-  return mapRowToDto(row);
+  return mapRowToDto(row, locale);
 }
 
-// ---------------------------------------------------------------------------
-// RSC loaders (called by marketing pages — deduped with React cache())
-// ---------------------------------------------------------------------------
-
-export async function loadPublishedBlogPostsForMarketing(): Promise<BlogPostDto[]> {
-  const { items } = await listPublicBlogPosts({ page: 1, limit: 500 });
+export async function loadPublishedBlogPostsForMarketing(
+  locale: AppLocale = defaultLocale,
+): Promise<BlogPostDto[]> {
+  const { items } = await listPublicBlogPosts({ page: 1, limit: 500, locale });
   return items;
 }
 
 export const loadLatestFeaturedBlogPostsForHome = cache(
-  async (limit = 4): Promise<BlogPostDto[]> => {
+  async (limit = 4, locale: AppLocale = defaultLocale): Promise<BlogPostDto[]> => {
     const rows = await blogRepository.findLatestFeaturedPublished(limit);
-    return rows.map(mapRowToDto);
+    return rows.map((row) => mapRowToDto(row, locale));
   },
 );
 
-export const loadPublicBlogPostBySlug = cache(async (slug: string): Promise<BlogPostDto | null> => {
-  try {
-    return await getPublicBlogPostBySlug(slug);
-  } catch (e) {
-    if (e instanceof NotFoundError) return null;
-    throw e;
-  }
-});
+export const loadPublicBlogPostBySlug = cache(
+  async (slug: string, locale: AppLocale = defaultLocale): Promise<BlogPostDto | null> => {
+    try {
+      return await getPublicBlogPostBySlug(slug, locale);
+    } catch (e) {
+      if (e instanceof NotFoundError) return null;
+      throw e;
+    }
+  },
+);
 
-// ---------------------------------------------------------------------------
-// Sub-entity helpers (categories — used for admin dropdowns)
-// ---------------------------------------------------------------------------
-
-export async function listBlogCategoriesForAdmin() {
-  return blogRepository.findManyCategories();
+export async function listBlogCategoriesForAdmin(
+  locale: AppLocale = defaultLocale,
+): Promise<BlogCategoryOptionDto[]> {
+  const rows = await blogRepository.findManyCategories(locale);
+  return rows.map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    name: row.translations[0]?.name ?? row.slug,
+  }));
 }

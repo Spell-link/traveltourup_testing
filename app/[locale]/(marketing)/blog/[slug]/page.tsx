@@ -8,8 +8,12 @@ import { BlogPostMedia } from "@/components/blog/blog-post-media";
 import {
   createLocalizedRouteMetadata,
 } from "@/config/metadata.config";
+import { getSiteUrl } from "@/config/site-url";
 import { loadPublicBlogPostBySlug } from "@/lib/services/blog/blog.service";
+import { routing, type AppLocale } from "@/i18n/routing";
+import { rtlDirProp, rtlTypographyClass } from "@/lib/i18n/rtl-typography";
 import { cn } from "@/lib/utils";
+import HtmlTextRenderer from "@/components/admin_ui/shared/html-text-renderer";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +26,7 @@ type BlogDetailPageProps = {
 
 export async function generateMetadata({ params }: BlogDetailPageProps): Promise<Metadata> {
   const { locale, slug } = await params;
-  const blog = await loadPublicBlogPostBySlug(slug);
+  const blog = await loadPublicBlogPostBySlug(slug, locale as AppLocale);
 
   if (!blog) {
     return {
@@ -48,13 +52,27 @@ export async function generateMetadata({ params }: BlogDetailPageProps): Promise
     },
   };
 
-  const md = createLocalizedRouteMetadata(config, locale, `/blog/${slug}`);
+  const md = createLocalizedRouteMetadata(config, locale, `/blog/${blog.slug}`);
+  const base = getSiteUrl();
+  const languages: Record<string, string> = {
+    "x-default": `${base}/en/blog/${blog.alternateSlugs.en ?? blog.slug}`,
+  };
+  for (const l of routing.locales) {
+    const localizedSlug = blog.alternateSlugs[l as AppLocale];
+    if (localizedSlug) {
+      languages[l] = `${base}/${l}/blog/${localizedSlug}`;
+    }
+  }
   const ogImages = blog.images.map((img) => ({
     url: img.url,
     alt: img.alt,
   }));
   return {
     ...md,
+    alternates: {
+      canonical: `${base}/${locale}/blog/${blog.slug}`,
+      languages,
+    },
     openGraph: {
       ...md.openGraph,
       images: ogImages,
@@ -74,7 +92,7 @@ const postShell =
 
 const Page = async ({ params }: BlogDetailPageProps) => {
   const { slug, locale } = await params;
-  const blog = await loadPublicBlogPostBySlug(slug);
+  const blog = await loadPublicBlogPostBySlug(slug, locale as AppLocale);
 
   if (!blog) {
     notFound();
@@ -86,7 +104,8 @@ const Page = async ({ params }: BlogDetailPageProps) => {
 
   const contentFrame =
     "relative mx-auto min-w-0 w-[92%] max-w-[1600px] px-0 sm:w-[88%] md:w-[80%] lg:w-[80%]";
-
+  const articleDir = rtlDirProp(locale as AppLocale);
+  const articleTypography = rtlTypographyClass(locale as AppLocale);
   return (
     <section className="relative overflow-x-clip bg-gradient-to-b from-background via-background to-muted/25 pb-16 pt-8 md:pb-20 md:pt-12">
       <BlogArticleJsonLd blog={blog} locale={locale} />
@@ -161,7 +180,7 @@ const Page = async ({ params }: BlogDetailPageProps) => {
               </div>
             </div>
 
-            <article
+            {/* <article
               className="prose prose-lg prose-neutral max-w-none dark:prose-invert xl:prose-xl
             prose-headings:scroll-mt-24 prose-headings:font-[family-name:var(--heading-font)] prose-headings:font-bold prose-headings:tracking-tight
             prose-h2:mt-10 prose-h2:mb-4 prose-h2:border-b prose-h2:border-border/50 prose-h2:pb-3 prose-h2:text-2xl sm:prose-h2:text-3xl
@@ -173,7 +192,10 @@ const Page = async ({ params }: BlogDetailPageProps) => {
             prose-blockquote:my-6 prose-blockquote:border-l-4 prose-blockquote:border-primary/50 prose-blockquote:bg-muted/40 prose-blockquote:py-1 prose-blockquote:pl-5 prose-blockquote:pr-3 prose-blockquote:italic
             dark:prose-blockquote:border-primary/40 dark:prose-blockquote:bg-muted/25"
               dangerouslySetInnerHTML={{ __html: blog.content }}
-            />
+            /> */}
+            <article dir={articleDir} className={articleTypography}>
+              <HtmlTextRenderer preserveFormatting={false} content={blog.content} />
+            </article>
           </div>
 
           <BlogPostArticleEnd

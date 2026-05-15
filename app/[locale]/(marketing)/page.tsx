@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
-import Home from "@/views/Home";
+import { Suspense } from "react";
+// import Home from "@/components/Home";
+import FeaturedBlogSection from "@/components/blog/FeaturedBlogSection";
+import HomeFeaturedBlogsSkeleton from "@/components/blog/HomeFeaturedBlogsSkeleton";
 import { metadataForLocalizedRoute } from "@/config/metadata.config";
-import { loadLatestFeaturedBlogPostsForHome } from "@/lib/services/blog/blog.service";
+import type { AppLocale } from "@/i18n/routing";
+import HomeView from "@/views/HomeView";
 
 export async function generateMetadata({
   params,
@@ -12,7 +16,20 @@ export async function generateMetadata({
   return metadataForLocalizedRoute(locale, "/");
 }
 
-export default async function Page() {
-  const featuredBlogPosts = await loadLatestFeaturedBlogPostsForHome(4);
-  return <Home featuredBlogPosts={featuredBlogPosts} />;
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+
+  return (
+    <HomeView
+      blogSection={
+        <Suspense fallback={<HomeFeaturedBlogsSkeleton />}>
+          <FeaturedBlogSection locale={locale as AppLocale} />
+        </Suspense>
+      }
+    />
+  );
 }

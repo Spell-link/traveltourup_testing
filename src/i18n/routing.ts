@@ -11,5 +11,5 @@ export const ADMIN_GATE_LOCALE: AppLocale = "en";
 export const routing = defineRouting({
   locales: [...locales],
   defaultLocale,
-  localePrefix: "always",
+  localePrefix: "as-needed",
 });

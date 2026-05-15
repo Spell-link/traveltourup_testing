@@ -4,8 +4,10 @@ import { ConflictError, NotFoundError } from "@/lib/api/errors";
 import type { BlogPostDto } from "@/lib/blog/blog.types";
 import {
   blogRepository,
+  type BlogPostTranslationWriteInput,
   type BlogPostUpdateInput,
 } from "@/lib/db/repositories/blog.repository";
+import type { AppLocale } from "@/i18n/routing";
 import {
   createBlogPostSchema,
   updateBlogPostSchema,
@@ -17,25 +19,13 @@ import { buildPublishedAt, mapRowToDto } from "./blog.service";
 type CreateBody = z.infer<typeof createBlogPostSchema>;
 type UpdateBody = z.infer<typeof updateBlogPostSchema>;
 
-const SLUG_CONFLICT_ISSUES = [
-  {
-    path: ["slug"],
-    message: "A post with this URL slug already exists. Use a different slug.",
-  },
-] as const;
-
 type BlogImageRow = {
   url: string;
-  alt: string;
   sort_order: number;
   is_featured: boolean;
   storage_path: string | null;
 };
 
-/**
- * DB partial unique index allows only one `is_featured = true` per post.
- * Coalesce accidental duplicates / omissions before nested create/replace.
- */
 function normalizeBlogImageRowsForDb(images: BlogImageRow[]): BlogImageRow[] {
   if (images.length === 0) return images;
   const idx = images.findIndex((i) => i.is_featured);
@@ -51,37 +41,91 @@ function normalizeBlogImageRowsForDb(images: BlogImageRow[]): BlogImageRow[] {
   }));
 }
 
-export async function createAdminBlogPost(body: CreateBody): Promise<BlogPostDto> {
-  const slugTaken = await blogRepository.findAnyBySlug(body.slug);
-  if (slugTaken) {
-    throw new ConflictError(
-      "A post with this URL slug already exists. Use a different slug.",
-      [...SLUG_CONFLICT_ISSUES],
-    );
+function slugConflictIssues(locale: AppLocale, slug: string) {
+  return [
+    {
+      path: ["translations", locale, "slug"],
+      message: `A post with slug "${slug}" already exists for ${locale}.`,
+    },
+  ] as const;
+}
+
+function remapImageAlts(
+  imageAlts: Record<string, string>,
+  images: Array<{ id: string; sort_order: number }>,
+): Record<string, string> {
+  const bySortOrder = new Map(images.map((image) => [String(image.sort_order), image.id]));
+  const remapped: Record<string, string> = {};
+
+  for (const [key, alt] of Object.entries(imageAlts)) {
+    const imageId = bySortOrder.get(key) ?? key;
+    remapped[imageId] = alt;
   }
 
+  return remapped;
+}
+
+function toTranslationWrites(
+  translations: CreateBody["translations"],
+  images: Array<{ id: string; sort_order: number }>,
+): BlogPostTranslationWriteInput[] {
+  return Object.entries(translations).map(([locale, translation]) => ({
+    locale: locale as AppLocale,
+    title: translation.title,
+    slug: translation.slug,
+    content: sanitizeStoredBlogHtml(translation.content),
+    excerpt: translation.excerpt,
+    meta_title: translation.meta_title ?? null,
+    meta_description: translation.meta_description ?? null,
+    focus_keyphrase: translation.focus_keyphrase ?? null,
+    canonical_url: translation.canonical_url ?? null,
+    image_alts: remapImageAlts(translation.image_alts ?? {}, images),
+  }));
+}
+
+async function assertUniqueTranslationSlugs(
+  translations: BlogPostTranslationWriteInput[],
+  excludePostId?: string,
+): Promise<void> {
+  for (const translation of translations) {
+    const existing = await blogRepository.findTranslationByLocaleSlug(
+      translation.locale,
+      translation.slug,
+      excludePostId,
+    );
+    if (existing) {
+      throw new ConflictError(
+        `A post with slug "${translation.slug}" already exists for ${translation.locale}.`,
+        [...slugConflictIssues(translation.locale, translation.slug)],
+      );
+    }
+  }
+}
+
+export async function createAdminBlogPost(body: CreateBody): Promise<BlogPostDto> {
   const published_at = buildPublishedAt(body.status, body.published_at, null);
   const imageRows = normalizeBlogImageRowsForDb(
     body.images.map((img, i) => ({
       url: img.url,
-      alt: img.alt,
       sort_order: img.sort_order ?? i,
       is_featured: img.is_featured,
       storage_path: img.storage_path ?? null,
     })),
   );
+
+  const translationWrites = toTranslationWrites(body.translations, imageRows.map((row, index) => ({
+    id: String(index),
+    sort_order: row.sort_order,
+  })));
+  await assertUniqueTranslationSlugs(translationWrites);
+
   const row = await blogRepository.create({
-    title: body.title,
-    slug: body.slug,
-    content: sanitizeStoredBlogHtml(body.content),
-    excerpt: body.excerpt,
     tags: body.tags,
     status: body.status,
     featured: body.featured,
     views_count: body.views_count,
     read_time: body.read_time,
-    meta_title: body.meta_title ?? undefined,
-    meta_description: body.meta_description ?? undefined,
+    robots_meta: body.robots_meta ?? "index,follow",
     published_at,
     category: { connect: { id: body.category_id } },
     ...(body.author_id
@@ -90,14 +134,21 @@ export async function createAdminBlogPost(body: CreateBody): Promise<BlogPostDto
     images: {
       create: imageRows.map((row) => ({
         url: row.url,
-        alt: row.alt,
         sort_order: row.sort_order,
         is_featured: row.is_featured,
         storage_path: row.storage_path,
       })),
     },
   });
-  return mapRowToDto(row);
+
+  const remappedTranslations = toTranslationWrites(body.translations, row.images);
+  await blogRepository.upsertTranslations(row.id, remappedTranslations);
+
+  const refreshed = await blogRepository.findByIdAdmin(row.id);
+  if (!refreshed) {
+    throw new NotFoundError("Blog post");
+  }
+  return mapRowToDto(refreshed);
 }
 
 export async function updateAdminBlogPost(id: string, body: UpdateBody): Promise<BlogPostDto> {
@@ -112,26 +163,11 @@ export async function updateAdminBlogPost(id: string, body: UpdateBody): Promise
       ? buildPublishedAt(nextStatus, body.published_at ?? existing.published_at, existing.published_at)
       : existing.published_at;
 
-  if (body.slug !== undefined && body.slug !== existing.slug) {
-    const slugTaken = await blogRepository.findAnyBySlugExceptId(body.slug, id);
-    if (slugTaken) {
-      throw new ConflictError(
-        "A post with this URL slug already exists. Use a different slug.",
-        [...SLUG_CONFLICT_ISSUES],
-      );
-    }
-  }
-
   const data: BlogPostUpdateInput = {};
-  if (body.title !== undefined) data.title = body.title;
-  if (body.slug !== undefined) data.slug = body.slug;
-  if (body.content !== undefined) data.content = sanitizeStoredBlogHtml(body.content);
-  if (body.excerpt !== undefined) data.excerpt = body.excerpt;
   if (body.images !== undefined) {
     const imageRows = normalizeBlogImageRowsForDb(
       body.images.map((img, i) => ({
         url: img.url,
-        alt: img.alt,
         sort_order: img.sort_order ?? i,
         is_featured: img.is_featured,
         storage_path: img.storage_path ?? null,
@@ -141,7 +177,6 @@ export async function updateAdminBlogPost(id: string, body: UpdateBody): Promise
       deleteMany: {},
       create: imageRows.map((row) => ({
         url: row.url,
-        alt: row.alt,
         sort_order: row.sort_order,
         is_featured: row.is_featured,
         storage_path: row.storage_path,
@@ -153,8 +188,7 @@ export async function updateAdminBlogPost(id: string, body: UpdateBody): Promise
   if (body.featured !== undefined) data.featured = body.featured;
   if (body.views_count !== undefined) data.views_count = body.views_count;
   if (body.read_time !== undefined) data.read_time = body.read_time;
-  if (body.meta_title !== undefined) data.meta_title = body.meta_title;
-  if (body.meta_description !== undefined) data.meta_description = body.meta_description;
+  if (body.robots_meta !== undefined) data.robots_meta = body.robots_meta;
   if (body.published_at !== undefined || body.status !== undefined) {
     data.published_at = published_at;
   }
@@ -167,6 +201,19 @@ export async function updateAdminBlogPost(id: string, body: UpdateBody): Promise
       : { disconnect: true };
   }
 
-  const row = await blogRepository.update(id, data);
-  return mapRowToDto(row);
+  const row = Object.keys(data).length > 0
+    ? await blogRepository.update(id, data)
+    : existing;
+
+  if (body.translations) {
+    const translationWrites = toTranslationWrites(body.translations, row.images);
+    await assertUniqueTranslationSlugs(translationWrites, id);
+    await blogRepository.upsertTranslations(id, translationWrites);
+  }
+
+  const refreshed = await blogRepository.findByIdAdmin(id);
+  if (!refreshed) {
+    throw new NotFoundError("Blog post");
+  }
+  return mapRowToDto(refreshed);
 }

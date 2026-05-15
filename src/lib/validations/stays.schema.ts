@@ -41,13 +41,12 @@ export const staysGuestBookingSchema = z.object({
 
 export const staysBookingBodySchema = z.object({
   quote_id: z.string().min(1).max(128),
+  payment: z.object({
+    three_d_secure_session_id: z.string().min(1),
+  }),
   email: z.string().email(),
-  phone_number: z
-    .string()
-    .min(8)
-    .max(20)
-    .regex(/^\+[1-9]\d{6,18}$/, "Use E.164 format, e.g. +442080160509"),
-  guests: z.array(staysGuestBookingSchema).min(1).max(20),
+  phone_number: z.string().min(1).max(32),
+  guests: z.array(staysGuestBookingSchema).min(1),
   accommodation_special_requests: z.string().max(500).optional(),
 });
 

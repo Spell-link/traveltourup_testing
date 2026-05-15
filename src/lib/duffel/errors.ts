@@ -40,6 +40,14 @@ export class DuffelApiError extends Error {
   get clientMessage(): string {
     return clientSafeMessage(this.status, this.duffelErrors);
   }
+
+  get firstDuffelErrorCode(): string | undefined {
+    return this.duffelErrors[0]?.code;
+  }
+
+  hasDuffelErrorCode(code: string): boolean {
+    return this.duffelErrors.some((e) => e.code === code);
+  }
 }
 
 export function isRetryableDuffelStatus(status: number): boolean {

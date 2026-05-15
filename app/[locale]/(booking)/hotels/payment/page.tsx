@@ -5,7 +5,7 @@ import { localizedCustomerPath } from "@/i18n/locale-path";
 import type { AppLocale } from "@/i18n/routing";
 import { safeInternalPath } from "@/lib/auth/redirect";
 import { getServerAuthz } from "@/lib/authz/session";
-import { HotelPaymentPageClient } from "./HotelPaymentPageClient";
+import HotelPayment from "@/views/HotelPayment";
 
 export async function generateMetadata({
   params,
@@ -53,5 +53,5 @@ export default async function Page({
     redirect(`/${locale}/login?next=${encodeURIComponent(returnPath)}`);
   }
 
-  return <HotelPaymentPageClient />;
+  return <HotelPayment />;
 }

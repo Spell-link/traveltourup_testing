@@ -362,7 +362,6 @@
       "payNowOrHoldTitle": "Pay now or hold",
       "payNowOrHoldIntro": "Pay now confirms with the airline immediately. Hold reserves the fare while you finish arrangements (when enabled for your account).",
       "payNowTitle": "Pay now",
-      "payNowDescription": "Pay with card via Duffel. Your booking is confirmed after payment succeeds.",
       "holdOrderTitle": "Hold order",
       "holdOrderDescription": "Place a hold without charging your card. Pay later before the hold expires.",
       "holdDisabledHint": "Hold checkout is not enabled yet. Set FLIGHT_HOLD_BACKEND and NEXT_PUBLIC_FLIGHT_HOLD_BACKEND when your Duffel account supports hold orders.",
@@ -424,7 +423,9 @@
       "errorCouldNotStartPayment": "Could not start payment",
       "errorCouldNotPlaceHold": "Could not place hold",
       "errorBookingFailedAfterPayment": "Booking failed after payment",
-      "errorCardPaymentFailed": "Card payment failed"
+      "errorCardPaymentFailed": "Card payment failed",
+      "duffelPaymentsStripeHint": "When you pay, your browser may call Stripe (payment intents starting with pi_…). That is Duffel’s card processor topping up your payment before we confirm the ticket. Your receipt uses Duffel’s payment reference (pit_…). In the Duffel dashboard, balance “Order” lines are the ticket purchase after that top-up—card charges may appear under Payments or a separate row, not always in the same table cell as the order.",
+      "payNowDescription": "Pay with card via Duffel (processed by Stripe). Your card is charged when you submit payment here; we only complete the airline booking after that succeeds. If the airline cannot confirm, we start a refund automatically when possible."
     },
     "results": {
       "searchFailed": "Flight search failed",

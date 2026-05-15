@@ -290,3 +290,5 @@ export function FlightDetailContent({ flight, offer }: FlightDetailContentProps)
     </div>
   );
 }
+
+export { FlightDetailContentSkeleton } from "./FlightDetailSkeleton";

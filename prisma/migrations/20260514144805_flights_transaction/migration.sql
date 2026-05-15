@@ -1,0 +1,8 @@
+-- RenameForeignKey
+ALTER TABLE "flight_payment_refund_attempts" RENAME CONSTRAINT "flight_payment_refund_attempts_flight_order_cancellation_id_fke" TO "flight_payment_refund_attempts_flight_order_cancellation_i_fkey";
+
+-- RenameForeignKey
+ALTER TABLE "flight_payment_refund_attempts" RENAME CONSTRAINT "flight_payment_refund_attempts_flight_payment_intent_record_id_" TO "flight_payment_refund_attempts_flight_payment_intent_recor_fkey";
+
+-- RenameIndex
+ALTER INDEX "flight_payment_intent_records_order_failure_booking_idempotency" RENAME TO "flight_payment_intent_records_order_failure_booking_idempot_key";

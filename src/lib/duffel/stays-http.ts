@@ -24,6 +24,10 @@ export function staysCreateQuote(rateId: string) {
   });
 }
 
+export function staysGetQuote(quoteId: string) {
+  return duffelFetch<unknown>(`/stays/quotes/${encodeURIComponent(quoteId)}`);
+}
+
 export function staysCreateBooking(data: object) {
   return duffelFetch<unknown>("/stays/bookings", {
     method: "POST",

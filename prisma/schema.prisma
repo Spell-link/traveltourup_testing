@@ -170,8 +170,36 @@ model Booking {
   hotelBooking         HotelBooking?
   carBooking           CarBooking?
   flightPaymentIntents FlightPaymentIntentRecord[]
+  flightPaymentRefundAttempts FlightPaymentRefundAttempt[]
+  financialEvents      BookingFinancialEvent[]
 
+  @@index([user_id, created_at])
   @@map("bookings")
+}
+
+/// Append-only money-moving event log for support, reconciliation, and the
+/// customer "money timeline" UI. Never updated — write a new row per event.
+model BookingFinancialEvent {
+  id                              String   @id @default(cuid())
+  booking_id                      String?  @map("booking_id")
+  flight_payment_intent_record_id String?  @map("flight_payment_intent_record_id")
+  /// See `BOOKING_FINANCIAL_EVENT_TYPES` in src/lib/constants/booking-states.ts.
+  type                            String   @map("type") @db.VarChar(40)
+  amount                          String?  @map("amount") @db.VarChar(24)
+  currency                        String?  @map("currency") @db.VarChar(3)
+  /// Free-form context (Duffel ids, error codes, refund ids, change ids, etc.).
+  payload                         Json?    @map("payload")
+  /// Optional correlation id for tracing across HTTP + webhooks + cron.
+  request_id                      String?  @map("request_id") @db.VarChar(64)
+  created_at                      DateTime @default(now()) @map("created_at")
+
+  booking                   Booking?                   @relation(fields: [booking_id], references: [id], onDelete: SetNull)
+  flightPaymentIntentRecord FlightPaymentIntentRecord? @relation(fields: [flight_payment_intent_record_id], references: [id], onDelete: SetNull)
+
+  @@index([booking_id, created_at])
+  @@index([flight_payment_intent_record_id, created_at])
+  @@index([type, created_at])
+  @@map("booking_financial_events")
 }
 
 model FlightBooking {
@@ -196,8 +224,46 @@ model FlightBooking {
   booking Booking @relation(fields: [booking_id], references: [id], onDelete: Cascade)
   ancillaries BookingAncillary[]
   orderCancellations FlightOrderCancellation[]
+  orderChanges FlightOrderChange[]
 
   @@map("flight_bookings")
+}
+
+/**
+ * Voluntary order change (exchange) — quote then confirm per Duffel
+ * `order_change_requests` → `order_changes` flow. We also persist
+ * airline-initiated schedule changes here with `source = 'airline'`. Payment
+ * for positive deltas reuses the existing PaymentIntent saga; the
+ * `flight_payment_intent_record_id` column links the (optional) intent.
+ */
+model FlightOrderChange {
+  id                              String   @id @default(cuid())
+  flight_booking_id               String   @map("flight_booking_id")
+  /// 'user' (voluntary) or 'airline' (involuntary / schedule change).
+  source                          String   @default("user") @map("source") @db.VarChar(16)
+  duffel_order_change_request_id  String?  @map("duffel_order_change_request_id") @db.VarChar(64)
+  duffel_order_change_id          String?  @map("duffel_order_change_id") @db.VarChar(64)
+  /// Quoted price delta (positive when customer pays more, negative when refunded).
+  change_amount                   String?  @map("change_amount") @db.VarChar(24)
+  change_currency                 String?  @map("change_currency") @db.VarChar(3)
+  /// `pending` | `quoted` | `confirmed` | `expired` | `cancelled` | `failed`.
+  status                          String   @map("status") @db.VarChar(24)
+  /// Optional link to the PaymentIntent used to pay the positive delta.
+  flight_payment_intent_record_id String?  @map("flight_payment_intent_record_id")
+  quote_expires_at                DateTime? @map("quote_expires_at")
+  confirmed_at                    DateTime? @map("confirmed_at")
+  raw                             Json?    @map("raw")
+  created_at                      DateTime @default(now()) @map("created_at")
+  updated_at                      DateTime @updatedAt @map("updated_at")
+
+  flightBooking             FlightBooking              @relation(fields: [flight_booking_id], references: [id], onDelete: Cascade)
+  flightPaymentIntentRecord FlightPaymentIntentRecord? @relation("FlightOrderChangePaymentIntent", fields: [flight_payment_intent_record_id], references: [id], onDelete: SetNull)
+
+  @@unique([duffel_order_change_request_id])
+  @@unique([duffel_order_change_id])
+  @@index([flight_booking_id])
+  @@index([status, quote_expires_at])
+  @@map("flight_order_changes")
 }
 
 /// Duffel order cancellation (`ore_*`) — quote then confirm per Duffel API.
@@ -217,10 +283,36 @@ model FlightOrderCancellation {
   updated_at             DateTime  @updatedAt @map("updated_at")
 
   flightBooking FlightBooking @relation(fields: [flight_booking_id], references: [id], onDelete: Cascade)
+  refundAttempt   FlightPaymentRefundAttempt?
 
   @@index([flight_booking_id])
   @@index([duffel_order_id])
+  @@index([status, quote_expires_at])
   @@map("flight_order_cancellations")
+}
+
+/// One card refund attempt per Duffel order cancellation (`POST /payments/refunds`).
+model FlightPaymentRefundAttempt {
+  id                            String   @id @default(cuid())
+  booking_id                    String   @map("booking_id")
+  flight_order_cancellation_id  String   @unique @map("flight_order_cancellation_id")
+  flight_payment_intent_record_id String? @map("flight_payment_intent_record_id")
+  provider                      String   @default("duffel_payments") @map("provider") @db.VarChar(24)
+  duffel_refund_id              String?  @unique @map("duffel_refund_id") @db.VarChar(64)
+  amount                        String?  @map("amount") @db.VarChar(24)
+  currency                      String?  @map("currency") @db.VarChar(3)
+  status                        String   @map("status") @db.VarChar(24)
+  error_code                    String?  @map("error_code") @db.VarChar(120)
+  raw                           Json?    @map("raw")
+  created_at                    DateTime @default(now()) @map("created_at")
+  updated_at                    DateTime @updatedAt @map("updated_at")
+
+  booking                   Booking                 @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+  flightOrderCancellation   FlightOrderCancellation @relation(fields: [flight_order_cancellation_id], references: [id], onDelete: Cascade)
+  flightPaymentIntentRecord FlightPaymentIntentRecord? @relation(fields: [flight_payment_intent_record_id], references: [id], onDelete: SetNull)
+
+  @@index([booking_id])
+  @@map("flight_payment_refund_attempts")
 }
 
 /// Confirmed ancillaries from Duffel order (seats, bags, etc.).
@@ -278,14 +370,61 @@ model FlightPaymentIntentRecord {
   client_token     String  @map("client_token") @db.Text
   idempotency_key  String? @unique @map("idempotency_key")
   booking_id       String? @map("booking_id")
+  /// Set when `POST /air/orders` failed after payment; used for idempotent error replay.
+  order_failure_at                        DateTime? @map("order_failure_at")
+  order_failure_booking_idempotency_key   String?   @unique @map("order_failure_booking_idempotency_key")
+  order_failure_code                      String?   @map("order_failure_code") @db.VarChar(64)
+  order_failure_refund_id                 String?   @map("order_failure_refund_id") @db.VarChar(64)
+  order_failure_refund_status             String?   @map("order_failure_refund_status") @db.VarChar(32)
 
   created_at DateTime @default(now()) @map("created_at")
   updated_at DateTime @updatedAt @map("updated_at")
 
   booking Booking? @relation(fields: [booking_id], references: [id], onDelete: SetNull)
+  refundAttempts FlightPaymentRefundAttempt[]
+  financialEvents BookingFinancialEvent[]
+  orderChanges FlightOrderChange[] @relation("FlightOrderChangePaymentIntent")
 
   @@index([booking_id])
+  @@index([status, updated_at])
   @@map("flight_payment_intent_records")
+}
+
+/**
+ * Per-route / cabin / carrier pricing overrides on top of the env-driven
+ * `FlightPaymentsConfig`. Highest-priority matching enabled rule wins; caps
+ * are always enforced after resolution. Strings throughout to avoid drift
+ * with the existing `String` monetary columns; resolver casts to Number.
+ */
+model FlightPricingRule {
+  id                           String   @id @default(cuid())
+  name                         String
+  enabled                      Boolean  @default(true)
+  /// Lower wins. Use 100 as the default priority.
+  priority                     Int      @default(100)
+  origin_iata                  String?  @map("origin_iata") @db.VarChar(8)
+  destination_iata             String?  @map("destination_iata") @db.VarChar(8)
+  carrier_iata                 String?  @map("carrier_iata") @db.VarChar(8)
+  /// 'economy' | 'premium_economy' | 'business' | 'first'.
+  cabin_class                  String?  @map("cabin_class") @db.VarChar(24)
+  /// Override commission percent (0–100). Null = use env config default.
+  commission_percent_override  Decimal? @map("commission_percent_override") @db.Decimal(6, 3)
+  /// Override fixed markup in offer currency, major units. Null = use env default.
+  markup_fixed_override        String?  @map("markup_fixed_override") @db.VarChar(24)
+  /// Hard cap (percent) applied after override. Null = no cap beyond resolved value.
+  max_commission_percent       Decimal? @map("max_commission_percent") @db.Decimal(6, 3)
+  /// Hard cap (fixed, major units). Null = no cap.
+  max_markup_fixed             String?  @map("max_markup_fixed") @db.VarChar(24)
+  /// Optional effective window.
+  effective_from               DateTime? @map("effective_from")
+  effective_to                 DateTime? @map("effective_to")
+  notes                        String?  @db.Text
+  created_at                   DateTime @default(now()) @map("created_at")
+  updated_at                   DateTime @updatedAt @map("updated_at")
+
+  @@index([enabled, priority])
+  @@index([origin_iata, destination_iata])
+  @@map("flight_pricing_rules")
 }
 
 model DuffelWebhookEvent {
@@ -372,45 +511,82 @@ model AdminCar {
 
 model BlogCategory {
   id         String   @id @default(cuid())
-  name       String
   slug       String   @unique
   created_at DateTime @default(now()) @map("created_at")
   updated_at DateTime @updatedAt @map("updated_at")
 
-  posts BlogPost[]
+  posts        BlogPost[]
+  translations BlogCategoryTranslation[]
 
   @@map("blog_categories")
 }
 
+model BlogCategoryTranslation {
+  id          String   @id @default(cuid())
+  category_id String   @map("category_id")
+  locale      String   @db.VarChar(8)
+  name        String
+  created_at  DateTime @default(now()) @map("created_at")
+  updated_at  DateTime @updatedAt @map("updated_at")
+
+  category BlogCategory @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@unique([category_id, locale])
+  @@index([locale])
+  @@map("blog_category_translations")
+}
+
 model BlogPost {
-  id               String    @id @default(cuid())
-  title            String
-  slug             String    @unique
-  content          String    @db.Text
-  excerpt          String    @db.Text
-  tags             String[]  @default([])
-  status           String    @default("draft")
-  featured         Boolean   @default(false)
-  views_count      Int       @default(0) @map("views_count")
-  read_time        Int       @default(0) @map("read_time")
-  meta_title       String?   @map("meta_title") @db.Text
-  meta_description String?   @map("meta_description") @db.Text
-  published_at     DateTime? @map("published_at")
-  created_at       DateTime  @default(now()) @map("created_at")
-  updated_at       DateTime  @updatedAt @map("updated_at")
+  id           String    @id @default(cuid())
+  tags         String[]  @default([])
+  status       String    @default("draft")
+  featured     Boolean   @default(false)
+  views_count  Int       @default(0) @map("views_count")
+  read_time    Int       @default(0) @map("read_time")
+  robots_meta  String?   @default("index,follow") @map("robots_meta")
+  published_at DateTime? @map("published_at")
+  created_at   DateTime  @default(now()) @map("created_at")
+  updated_at   DateTime  @updatedAt @map("updated_at")
 
-  category_id String        @map("category_id")
-  category    BlogCategory  @relation(fields: [category_id], references: [id], onDelete: Restrict)
+  category_id String       @map("category_id")
+  category    BlogCategory @relation(fields: [category_id], references: [id], onDelete: Restrict)
 
-  author_id String?      @map("author_id") @db.Uuid
-  author    User? @relation(fields: [author_id], references: [id], onDelete: SetNull)
+  author_id String? @map("author_id") @db.Uuid
+  author    User?   @relation(fields: [author_id], references: [id], onDelete: SetNull)
 
-  images BlogPostImage[]
+  images       BlogPostImage[]
+  translations BlogPostTranslation[]
 
   @@index([status, published_at])
   @@index([category_id])
   @@index([updated_at])
+  @@index([robots_meta])
   @@map("blog_posts")
+}
+
+model BlogPostTranslation {
+  id               String   @id @default(cuid())
+  blog_post_id     String   @map("blog_post_id")
+  locale           String   @db.VarChar(8)
+  title            String
+  slug             String
+  content          String   @db.Text
+  excerpt          String   @db.Text
+  meta_title       String?  @map("meta_title") @db.Text
+  meta_description String?  @map("meta_description") @db.Text
+  focus_keyphrase  String?  @map("focus_keyphrase") @db.Text
+  canonical_url    String?  @map("canonical_url") @db.Text
+  /// Map of `BlogPostImage.id` → localized alt text.
+  image_alts       Json     @default("{}") @map("image_alts")
+  created_at       DateTime @default(now()) @map("created_at")
+  updated_at       DateTime @updatedAt @map("updated_at")
+
+  blog_post BlogPost @relation(fields: [blog_post_id], references: [id], onDelete: Cascade)
+
+  @@unique([blog_post_id, locale])
+  @@unique([locale, slug])
+  @@index([locale])
+  @@map("blog_post_translations")
 }
 
 /// Gallery images for a blog post; exactly one per post should have `is_featured` (card / OG hero).
@@ -419,7 +595,6 @@ model BlogPostImage {
   id           String   @id @default(cuid())
   blog_post_id String   @map("blog_post_id")
   url          String   @db.Text
-  alt          String
   sort_order   Int      @default(0) @map("sort_order")
   is_featured  Boolean  @default(false) @map("is_featured")
   /// Optional Supabase `blogs_images` object key for admin storage cleanup.

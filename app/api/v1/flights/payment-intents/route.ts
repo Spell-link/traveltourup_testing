@@ -5,7 +5,7 @@ import { clientIpFromHeaders, rateLimitByKey } from "@/lib/api/rate-limit-ip";
 import { successResponse } from "@/lib/api/response";
 import { getServerAuthz } from "@/lib/authz/session";
 import { isDuffelConfigured } from "@/lib/duffel/config";
-import { prepareFlightCheckout } from "@/lib/payments/flight-payment-orchestrator";
+import { createFlightCheckoutPaymentIntent } from "@/lib/services/flights/flight-payment-intent.service";
 import { createFlightPaymentIntentBodySchema } from "@/lib/validations/flight-payment.schema";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       throw new AppError(400, "Idempotency-Key is too long.", "VALIDATION_ERROR");
     }
 
-    const data = await prepareFlightCheckout({
+    const data = await createFlightCheckoutPaymentIntent({
       offerId: parsed.data.offer_id.trim(),
       idempotencyKey: idem,
       services: parsed.data.services,

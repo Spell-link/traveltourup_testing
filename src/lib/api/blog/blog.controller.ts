@@ -18,6 +18,7 @@ import {
   updateAdminBlogPost,
 } from "@/lib/services/blog/blog-write.service";
 import {
+  appLocaleSchema,
   blogAdminListQuerySchema,
   blogPostCuidParamSchema,
   blogPostKeyParamSchema,
@@ -61,6 +62,7 @@ export async function handleBlogCollectionGET(req: NextRequest): Promise<Respons
       limit: searchParams.get("limit") ?? undefined,
       q: searchParams.get("q") ?? undefined,
       category_slug: searchParams.get("category_slug") ?? undefined,
+      locale: searchParams.get("locale") ?? undefined,
     });
     const { items, total, page, limit } = await listPublicBlogPosts(query);
     return paginatedResponse(items, { total, page, limit });
@@ -81,7 +83,7 @@ export async function handleBlogCollectionPOST(req: NextRequest): Promise<Respon
 }
 
 export async function handleBlogItemGET(
-  _req: NextRequest,
+  req: NextRequest,
   params: Promise<{ key: string }>,
 ): Promise<Response> {
   try {
@@ -93,7 +95,9 @@ export async function handleBlogItemGET(
       return successResponse(post);
     }
 
-    const post = await getPublicBlogPostBySlug(key);
+    const { searchParams } = new URL(req.url);
+    const locale = appLocaleSchema.optional().parse(searchParams.get("locale") ?? undefined);
+    const post = await getPublicBlogPostBySlug(key, locale);
     return successResponse(post);
   } catch (error) {
     return handleApiError(error);

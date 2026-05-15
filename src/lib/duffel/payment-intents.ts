@@ -26,6 +26,15 @@ function unwrapData<T>(body: unknown): T {
   return data;
 }
 
+/** GET /payments/payment_intents/:id */
+export async function getDuffelPaymentIntent(paymentIntentId: string): Promise<DuffelPaymentIntentResource> {
+  const res = await duffelFetch<unknown>(
+    `/payments/payment_intents/${encodeURIComponent(paymentIntentId)}`,
+    { method: "GET" },
+  );
+  return unwrapData<DuffelPaymentIntentResource>(res);
+}
+
 /** POST /payments/payment_intents */
 export async function createDuffelPaymentIntent(input: {
   amount: string;

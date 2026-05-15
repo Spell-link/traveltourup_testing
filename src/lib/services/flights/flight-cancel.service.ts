@@ -4,15 +4,42 @@ import { Prisma } from "@/generated/prisma";
 import { AppError } from "@/lib/api/errors";
 import { ForbiddenError } from "@/lib/authz/errors";
 import { hasPermission, type AuthzContext } from "@/lib/authz";
+import { bookingFinancialEventRepository } from "@/lib/db/repositories/booking-financial-event.repository";
 import { bookingRepository } from "@/lib/db/repositories/booking.repository";
 import { parseDuffelOrderCancellationResponse } from "@/lib/duffel/order-cancellation-parse";
 import { confirmOrderCancellation, createOrderCancellation } from "@/lib/duffel/order-cancellations";
 import { DuffelApiError } from "@/lib/duffel/errors";
 import { prisma } from "@/lib/prisma";
 import { serializeBookingResponse } from "@/lib/services/booking.service";
+import { sendFlightCancellationEmail } from "@/lib/services/flights/flight-emails.service";
+import {
+  retryDuffelFlightRefundForBooking,
+  settleDuffelFlightRefundAfterCancellation,
+} from "@/lib/services/flights/flight-refund.service";
 import type { FlightBookingCancelBody } from "@/lib/validations/flight-cancel.schema";
+import type { BookingFinancialEventType } from "@/lib/constants/booking-states";
 
-function assertCanCancelFlightBooking(input: {
+async function logCancelEvent(input: {
+  type: BookingFinancialEventType;
+  booking_id: string;
+  amount?: string | null;
+  currency?: string | null;
+  payload?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await bookingFinancialEventRepository.record({
+      type: input.type,
+      booking_id: input.booking_id,
+      amount: input.amount ?? null,
+      currency: input.currency ?? null,
+      payload: (input.payload ?? null) as unknown as Prisma.InputJsonValue | null,
+    });
+  } catch {
+    // best-effort audit log
+  }
+}
+
+export function assertCanCancelFlightBooking(input: {
   authz: AuthzContext | null;
   userId: string;
   bookingUserId: string | null;
@@ -28,16 +55,10 @@ function assertCanCancelFlightBooking(input: {
   throw new ForbiddenError();
 }
 
-function paymentStatusAfterCancel(
-  bookingTotal: Prisma.Decimal,
-  refundAmount: string | null,
-): "refunded" | "partially_refunded" {
-  if (refundAmount == null || refundAmount === "") return "partially_refunded";
-  const r = Number.parseFloat(refundAmount);
-  const t = Number.parseFloat(bookingTotal.toString());
-  if (!Number.isFinite(r) || !Number.isFinite(t)) return "partially_refunded";
-  if (r + 0.005 >= t) return "refunded";
-  return "partially_refunded";
+/** When marking the booking cancelled: airline credits vs card refund pipeline. */
+function paymentStatusWhenMarkingCancelled(refundTo: string | null): string {
+  if (refundTo === "airline_credits") return "credit_issued";
+  return "refund_processing";
 }
 
 function cancellationToApi(row: {
@@ -59,6 +80,127 @@ function cancellationToApi(row: {
     refund_to: row.refund_to,
     quote_expires_at: row.quote_expires_at?.toISOString() ?? null,
     confirmed_at: row.confirmed_at?.toISOString() ?? null,
+  };
+}
+
+function refundAttemptToApi(row: {
+  id: string;
+  status: string;
+  duffel_refund_id: string | null;
+  amount: string | null;
+  currency: string | null;
+  error_code: string | null;
+  created_at: Date;
+  updated_at: Date;
+}) {
+  return {
+    id: row.id,
+    status: row.status,
+    duffel_refund_id: row.duffel_refund_id,
+    amount: row.amount,
+    currency: row.currency,
+    error_code: row.error_code,
+    created_at: row.created_at.toISOString(),
+    updated_at: row.updated_at.toISOString(),
+  };
+}
+
+export async function getFlightBookingCancelStatus(input: {
+  authz: AuthzContext | null;
+  userId: string;
+  bookingId: string;
+}) {
+  const row = await bookingRepository.findById(input.bookingId);
+  if (!row) {
+    throw new AppError(404, "Booking not found.", "NOT_FOUND");
+  }
+
+  assertCanCancelFlightBooking({
+    authz: input.authz,
+    userId: input.userId,
+    bookingUserId: row.user_id,
+  });
+
+  if (row.type !== "flight" || !row.flightBooking) {
+    throw new AppError(400, "Only flight bookings have Duffel cancellation status.", "VALIDATION_ERROR");
+  }
+
+  const fb = row.flightBooking;
+  const latestOc = await prisma.flightOrderCancellation.findFirst({
+    where: { flight_booking_id: fb.id },
+    orderBy: { created_at: "desc" },
+  });
+
+  const refundAttempt = latestOc
+    ? await prisma.flightPaymentRefundAttempt.findUnique({
+        where: { flight_order_cancellation_id: latestOc.id },
+      })
+    : null;
+
+  return {
+    booking_id: row.id,
+    booking_status: row.status,
+    payment_status: row.payment_status,
+    order_cancellation: latestOc ? cancellationToApi(latestOc) : null,
+    refund_attempt: refundAttempt ? refundAttemptToApi(refundAttempt) : null,
+  };
+}
+
+export async function processDuffelFlightBookingRefundRetry(input: {
+  authz: AuthzContext | null;
+  userId: string;
+  bookingId: string;
+}) {
+  const row = await bookingRepository.findById(input.bookingId);
+  if (!row) {
+    throw new AppError(404, "Booking not found.", "NOT_FOUND");
+  }
+
+  assertCanCancelFlightBooking({
+    authz: input.authz,
+    userId: input.userId,
+    bookingUserId: row.user_id,
+  });
+
+  if (row.type !== "flight" || !row.flightBooking) {
+    throw new AppError(400, "Only flight bookings support refunds.", "VALIDATION_ERROR");
+  }
+
+  if (row.status !== "cancelled") {
+    throw new AppError(409, "Booking must be cancelled before retrying a refund.", "BOOKING_NOT_CANCELLED");
+  }
+
+  const fb = row.flightBooking;
+  const oc = await prisma.flightOrderCancellation.findFirst({
+    where: { flight_booking_id: fb.id, status: "confirmed" },
+    orderBy: { id: "desc" },
+  });
+
+  if (!oc) {
+    throw new AppError(400, "No confirmed cancellation found for this booking.", "NOT_FOUND");
+  }
+
+  if (oc.refund_to === "airline_credits") {
+    throw new AppError(400, "This cancellation was refunded as airline credits.", "VALIDATION_ERROR");
+  }
+
+  const result = await retryDuffelFlightRefundForBooking({
+    bookingId: row.id,
+    flightOrderCancellationId: oc.id,
+    refundTo: oc.refund_to,
+    refundAmount: oc.refund_amount,
+    refundCurrency: oc.refund_currency,
+    bookingTotalAmount: row.total_amount,
+  });
+
+  const updated = await bookingRepository.findById(row.id);
+  if (!updated) {
+    throw new AppError(500, "Booking disappeared after refund retry.", "INTERNAL_ERROR");
+  }
+
+  return {
+    refund: result,
+    booking: serializeBookingResponse(updated),
   };
 }
 
@@ -133,7 +275,7 @@ export async function processDuffelFlightBookingCancel(input: {
 
     await bookingRepository.supersedePendingOrderCancellations(fb.id);
 
-    await prisma.flightOrderCancellation.create({
+    const created = await prisma.flightOrderCancellation.create({
       data: {
         flight_booking_id: fb.id,
         duffel_cancellation_id: parsed.duffelCancellationId,
@@ -148,12 +290,20 @@ export async function processDuffelFlightBookingCancel(input: {
       },
     });
 
-    const created = await prisma.flightOrderCancellation.findUniqueOrThrow({
-      where: { duffel_cancellation_id: parsed.duffelCancellationId },
+    await logCancelEvent({
+      type: "cancel_quoted",
+      booking_id: row.id,
+      amount: parsed.refundAmount,
+      currency: parsed.refundCurrency,
+      payload: {
+        duffel_cancellation_id: parsed.duffelCancellationId,
+        duffel_order_id: parsed.duffelOrderId,
+        refund_to: parsed.refundTo,
+      },
     });
 
     if (parsed.confirmedAt) {
-      const payStatus = paymentStatusAfterCancel(row.total_amount, parsed.refundAmount);
+      const payStatus = paymentStatusWhenMarkingCancelled(parsed.refundTo);
       await prisma.$transaction([
         prisma.flightBooking.update({
           where: { id: fb.id },
@@ -164,6 +314,34 @@ export async function processDuffelFlightBookingCancel(input: {
           data: { status: "cancelled", payment_status: payStatus },
         }),
       ]);
+
+      await logCancelEvent({
+        type: "cancel_confirmed",
+        booking_id: row.id,
+        amount: parsed.refundAmount,
+        currency: parsed.refundCurrency,
+        payload: {
+          duffel_cancellation_id: parsed.duffelCancellationId,
+          refund_to: parsed.refundTo,
+          payment_status: payStatus,
+        },
+      });
+
+      await sendFlightCancellationEmail({
+        booking: row,
+        refundAmount: parsed.refundAmount,
+        refundCurrency: parsed.refundCurrency,
+        refundTo: parsed.refundTo,
+      });
+
+      await settleDuffelFlightRefundAfterCancellation({
+        bookingId: row.id,
+        flightOrderCancellationId: created.id,
+        refundTo: parsed.refundTo,
+        refundAmount: parsed.refundAmount,
+        refundCurrency: parsed.refundCurrency,
+        bookingTotalAmount: row.total_amount,
+      });
     }
 
     return {
@@ -202,6 +380,13 @@ export async function processDuffelFlightBookingCancel(input: {
     raw = await confirmOrderCancellation(oreId);
   } catch (e) {
     if (e instanceof DuffelApiError) {
+      if (e.hasDuffelErrorCode("order_cancellation_stale")) {
+        throw new AppError(
+          409,
+          "Cancellation quote is no longer valid. Request a new quote.",
+          "ORDER_CANCELLATION_STALE",
+        );
+      }
       throw new AppError(
         502,
         e.clientMessage || "Airline could not confirm cancellation.",
@@ -212,7 +397,7 @@ export async function processDuffelFlightBookingCancel(input: {
   }
 
   const parsed = parseDuffelOrderCancellationResponse(raw);
-  const payStatus = paymentStatusAfterCancel(row.total_amount, parsed.refundAmount);
+  const payStatus = paymentStatusWhenMarkingCancelled(parsed.refundTo);
 
   await prisma.$transaction([
     prisma.flightOrderCancellation.update({
@@ -240,6 +425,34 @@ export async function processDuffelFlightBookingCancel(input: {
       },
     }),
   ]);
+
+  await logCancelEvent({
+    type: "cancel_confirmed",
+    booking_id: row.id,
+    amount: parsed.refundAmount,
+    currency: parsed.refundCurrency,
+    payload: {
+      duffel_cancellation_id: oc.duffel_cancellation_id,
+      refund_to: parsed.refundTo,
+      payment_status: payStatus,
+    },
+  });
+
+  await sendFlightCancellationEmail({
+    booking: row,
+    refundAmount: parsed.refundAmount,
+    refundCurrency: parsed.refundCurrency,
+    refundTo: parsed.refundTo,
+  });
+
+  await settleDuffelFlightRefundAfterCancellation({
+    bookingId: row.id,
+    flightOrderCancellationId: oc.id,
+    refundTo: parsed.refundTo,
+    refundAmount: parsed.refundAmount,
+    refundCurrency: parsed.refundCurrency,
+    bookingTotalAmount: row.total_amount,
+  });
 
   const updated = await bookingRepository.findById(row.id);
   if (!updated) {

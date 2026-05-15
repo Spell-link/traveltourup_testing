@@ -62,12 +62,14 @@ async function duffelRequestOnce<T>(
       },
     });
   } catch (cause) {
-    const retryable = cause instanceof Error && cause.name === "TimeoutError";
+    const isTimeout = cause instanceof Error && cause.name === "TimeoutError";
     throw new DuffelApiError(
       504,
       [],
-      retryable || true,
-      "Flight supplier request timed out. Please try again.",
+      isTimeout,
+      isTimeout
+        ? "Flight supplier request timed out. Please try again."
+        : "Flight supplier is unreachable. Please try again.",
     );
   }
 

@@ -43,6 +43,9 @@ export async function createDuffelStayBooking(input: {
       family_name: g.family_name,
       born_on: g.born_on,
     })),
+    payment: {
+      three_d_secure_session_id: input.body.payment.three_d_secure_session_id,
+    },
   };
   if (input.body.accommodation_special_requests) {
     duffelBody.accommodation_special_requests = input.body.accommodation_special_requests;

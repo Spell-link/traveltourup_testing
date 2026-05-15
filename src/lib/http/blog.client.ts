@@ -1,7 +1,7 @@
 "use client";
 
 import { apiJson, apiPaginatedJson, type PaginatedApiResponse } from "@/lib/http/api-client";
-import type { BlogPostDto } from "@/lib/blog/blog.types";
+import type { BlogPostAdminDto, BlogPostDto } from "@/lib/blog/blog.types";
 
 export const BLOGS_V1_BASE = "/api/v1/blogs";
 
@@ -13,8 +13,8 @@ export async function listBlogPosts(
   return apiPaginatedJson<BlogPostDto>(BLOGS_V1_BASE, params);
 }
 
-export async function getBlogPost(key: string): Promise<BlogPostDto> {
-  return apiJson<BlogPostDto>(`${BLOGS_V1_BASE}/${encodeURIComponent(key)}`);
+export async function getBlogPost(key: string): Promise<BlogPostAdminDto> {
+  return apiJson<BlogPostAdminDto>(`${BLOGS_V1_BASE}/${encodeURIComponent(key)}`);
 }
 
 export async function listBlogCategories(): Promise<

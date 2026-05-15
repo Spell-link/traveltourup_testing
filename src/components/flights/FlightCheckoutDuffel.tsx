@@ -9,12 +9,7 @@ import type { FlightOfferDTO } from "@/lib/duffel/dto/flight-offer.dto";
 import type { FlightCheckoutBookingBody } from "@/lib/validations/flight-checkout.schema";
 import { mergeFlightOrderServiceLines, type FlightOrderServiceLine } from "@/lib/validations/flight-ancillaries.schema";
 import { isFlightHoldOrderBackendEnabled } from "@/config/flight-hold.config";
-import {
-  getFlightOffer,
-  postConfirmFlightPaymentIntent,
-  postFlightBooking,
-  postFlightPaymentIntent,
-} from "@/lib/http/flights.client";
+import { getFlightOffer, postFlightBooking, postFlightPaymentIntent } from "@/lib/http/flights.client";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { NativeSelect } from "@/components/ui/NativeSelect";
@@ -106,6 +101,16 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
   const [pricingError, setPricingError] = useState<string | null>(null);
   const [clientToken, setClientToken] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  /**
+   * Final amount the customer's card will be charged in the offer/charge currency.
+   * Populated after `POST /payment-intents` returns so the order summary shows the
+   * real charge (offer + extras + commission + Duffel fee gross-up) rather than the
+   * stale offer total or marketing line from sessionStorage.
+   */
+  const [chargePricing, setChargePricing] = useState<{
+    amount: string;
+    currency: string;
+  } | null>(null);
   const [payBusy, setPayBusy] = useState(false);
   const [confirmingBooking, setConfirmingBooking] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
@@ -263,6 +268,10 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
       );
       setClientToken(pit.client_token);
       setPaymentIntentId(pit.payment_intent_id);
+      setChargePricing({
+        amount: pit.pricing.customer_charge_amount,
+        currency: pit.pricing.customer_charge_currency,
+      });
       setStep("pay");
     } catch (e) {
       setPricingError(e instanceof Error ? e.message : t("errorCouldNotStartPayment"));
@@ -334,12 +343,12 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
     if (!paymentIntentId) return;
     setConfirmingBooking(true);
     try {
-      await postConfirmFlightPaymentIntent(paymentIntentId);
       const body = buildCheckoutBody();
       if (!body) {
         setStepError(t("errorMissingCheckoutData"));
         return;
       }
+      /** Confirm + `POST /air/orders` run server-side in one saga (`POST /flights/bookings`). */
       const booked = await postFlightBooking(body, bookingIdempotencyRef.current);
       setDoneBooking(booked);
     } catch (e) {
@@ -354,10 +363,18 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
   };
 
   const summaryTitle = bookingDetails?.title ?? t("defaultSummaryTitle");
+  /**
+   * Prefer the live `customer_charge_amount` from the Duffel PaymentIntent
+   * (offer + extras + markup + Duffel Payments fee). Falls back to offer total
+   * before the intent is created, and finally to the marketing summary copy
+   * persisted on the flight detail page.
+   */
   const summaryPrimaryPrice = useMemo(() => {
-    const parsedBooking = parseIsoCurrencyAmountLine(bookingDetails?.price);
-    if (parsedBooking) {
-      return formatPrice(parsedBooking.amount, parsedBooking.currency, locale);
+    if (chargePricing) {
+      const n = Number.parseFloat(chargePricing.amount);
+      if (Number.isFinite(n)) {
+        return formatPrice(n, chargePricing.currency, locale);
+      }
     }
     if (offer) {
       const n = Number.parseFloat(offer.total_amount);
@@ -365,8 +382,12 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
         return formatPrice(n, offer.total_currency, locale);
       }
     }
+    const parsedBooking = parseIsoCurrencyAmountLine(bookingDetails?.price);
+    if (parsedBooking) {
+      return formatPrice(parsedBooking.amount, parsedBooking.currency, locale);
+    }
     return bookingDetails?.price ?? "—";
-  }, [bookingDetails?.price, offer, formatPrice, locale]);
+  }, [chargePricing, bookingDetails?.price, offer, formatPrice, locale]);
 
   const offerTotalDisplay = useMemo(() => {
     if (!offer) return "—";
@@ -793,6 +814,7 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
                   onSuccessfulPayment={() => void onSuccessfulCardPayment()}
                   onFailedPayment={onFailedCardPayment}
                 />
+                <p className="mt-4 text-xs leading-relaxed text-muted-foreground">{t("duffelPaymentsStripeHint")}</p>
               </div>
             </div>
           ) : null}

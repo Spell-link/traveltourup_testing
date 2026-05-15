@@ -2,12 +2,19 @@
 
 import { Link } from "@/i18n/navigation";
 import { useSearchParams } from "next/navigation";
-import { HotelCheckoutDuffel } from "@/components/hotels/HotelCheckoutDuffel";
+import dynamic from "next/dynamic";
+import { HotelCheckoutLoadingSkeleton } from "@/components/hotels/HotelCheckoutLoadingSkeleton";
+
+const HotelCheckoutDuffel = dynamic(
+  () => import("@/components/hotels/HotelCheckoutDuffel").then((m) => m.HotelCheckoutDuffel),
+  {
+    ssr: false,
+    loading: () => <HotelCheckoutLoadingSkeleton />,
+  },
+);
 
 /**
  * Hotel checkout for Duffel Stays: requires `?quote_id=quo_…` (and optional session `ttu_stays_quote`).
- * Checkout is bundled with this entry (no lazy chunk) so the skeleton from `loading.tsx` / Suspense
- * matches immediately and the form is not delayed by a second network fetch.
  */
 export function StaysPaymentEntry() {
   const searchParams = useSearchParams();

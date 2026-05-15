@@ -1,11 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
-import { useForm, useFormState, useWatch, type UseFormReturn } from "react-hook-form";
-import type { BlogPostDto } from "@/lib/blog/blog.types";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useForm, useFormState, useWatch } from "react-hook-form";
+import type { BlogPostAdminDto } from "@/lib/blog/blog.types";
+import { getEnglishBlogSourceError } from "@/lib/blog/english-translation-guard";
 import { createBlogPost, updateBlogPost } from "@/lib/http/blog.client";
 import GenericForm, { type SubFormConfig } from "@/components/admin_ui/shared/generic-form";
+import { SeoToolsSection } from "./seo-tools-section";
+import {
+  BlogTranslationTab,
+  type BlogLocaleFormState,
+} from "./blog-translation-tab";
+import { useBlogAutoTranslate } from "./use-blog-auto-translate";
 import {
   galleryItemsFromDto,
   galleryToApiPayload,
@@ -18,36 +25,33 @@ import {
   uploadStorageFile,
 } from "@/lib/http/storage.client";
 import type { StorageVariantId } from "@/lib/storage/types";
-import { Star, Trash2 } from "lucide-react";
+import { locales, type AppLocale } from "@/i18n/routing";
+import { Plus, Star, Trash2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/admin_ui/ui/alert";
-import { Badge } from "@/components/admin_ui/ui/badge";
 import { Button } from "@/components/admin_ui/ui/button";
-import {
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/admin_ui/ui/form";
-import { Input } from "@/components/admin_ui/ui/input";
 import { cn } from "@/lib/utils";
-import { Plus, X, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/admin_ui/ui/tabs";
 
 type CategoryOption = { id: string; name: string; slug: string };
 
 export type BlogPostFormProps = {
   mode: "create" | "edit";
   categories: CategoryOption[];
-  initial?: BlogPostDto;
+  initial?: BlogPostAdminDto;
 };
 
 const BLOG_IMAGES_VARIANT: StorageVariantId = "blog-images";
 const BLOG_IMAGE_ACCEPT = "image/jpeg,image/png,image/webp,image/gif";
 
-/**
- * Produces a value that matches API `blog.schema` slug: /^[a-z0-9]+(?:-[a-z0-9]+)*$/
- * (kebab-case, no underscores / uppercase / stray punctuation).
- */
+const LOCALE_LABELS: Record<AppLocale, string> = {
+  en: "English",
+  ur: "Urdu",
+  ar: "Arabic",
+  fr: "French",
+  ru: "Russian",
+};
+
 function titleToSlug(raw: string): string {
   if (!raw.trim()) return "";
   const s = raw
@@ -71,7 +75,21 @@ function estimateReadMinutesFromHtml(html: string): number {
   return Math.max(1, Math.ceil(words / 200));
 }
 
-function initialImagesFromPost(initial?: BlogPostDto): GalleryItem[] {
+function emptyLocaleState(): BlogLocaleFormState {
+  return {
+    title: "",
+    slug: "",
+    excerpt: "",
+    content: "<p></p>",
+    meta_title: "",
+    meta_description: "",
+    focus_keyphrase: "",
+    canonical_url: "",
+    image_alts: {},
+  };
+}
+
+function initialImagesFromPost(initial?: BlogPostAdminDto): GalleryItem[] {
   if (!initial?.images?.length) return [];
   return normalizeGallery(galleryItemsFromDto(initial.images, BLOG_IMAGES_VARIANT));
 }
@@ -82,37 +100,53 @@ function toDatetimeLocalValue(d: Date): string {
 }
 
 export type BlogPostFormValues = {
-  title: string;
-  slug: string;
-  excerpt: string;
-  content: string;
   category_id: string;
   status: string;
   tags: string[];
   read_time: number;
-  meta_title: string;
-  meta_description: string;
-  focus_keyphrase: string;
+  robots_meta: string;
   published_at: string;
-  /** Ordered images; exactly one is featured (cover) when any have a URL. */
   images: GalleryItem[];
+  translations: Record<AppLocale, BlogLocaleFormState>;
 };
 
-function buildDefaults(initial: BlogPostDto | undefined, categories: CategoryOption[]): BlogPostFormValues {
+function buildDefaults(
+  initial: BlogPostAdminDto | undefined,
+  categories: CategoryOption[],
+): BlogPostFormValues {
+  const translations = Object.fromEntries(
+    locales.map((locale) => {
+      const translation = initial?.translations?.[locale];
+      return [
+        locale,
+        translation
+          ? {
+              title: translation.title,
+              slug: translation.slug,
+              excerpt: translation.excerpt,
+              content: translation.content,
+              meta_title: translation.seo.metaTitle,
+              meta_description: translation.seo.metaDescription,
+              focus_keyphrase: translation.seo.focusKeyphrase ?? "",
+              canonical_url: translation.seo.canonicalUrl ?? "",
+              image_alts: { ...translation.imageAlts },
+            }
+          : emptyLocaleState(),
+      ];
+    }),
+  ) as Record<AppLocale, BlogLocaleFormState>;
+
   return {
-    title: initial?.title ?? "",
-    slug: initial?.slug ?? "",
-    excerpt: initial?.excerpt ?? "",
-    content: initial?.content ?? "<p></p>",
     category_id: initial?.category.id ?? categories[0]?.id ?? "",
     status: initial?.status ?? "draft",
     tags: initial?.tags?.length ? [...initial.tags] : [],
-    read_time: initial?.readTime ?? estimateReadMinutesFromHtml(initial?.content ?? ""),
-    meta_title: initial?.seo.metaTitle ?? "",
-    meta_description: initial?.seo.metaDescription ?? "",
-    focus_keyphrase: "",
+    read_time:
+      initial?.readTime ??
+      estimateReadMinutesFromHtml(initial?.translations.en?.content ?? ""),
+    robots_meta: initial?.seo.robotsMeta ?? "index,follow",
     published_at: initial?.publishedAt ? toDatetimeLocalValue(new Date(initial.publishedAt)) : "",
     images: initialImagesFromPost(initial),
+    translations,
   };
 }
 
@@ -181,24 +215,16 @@ function BlogPostMediaSection({ value, onChange, disabled }: BlogPostMediaSectio
     );
   };
 
-  const setAlt = (clientId: string, alt: string) => {
-    onChange(
-      value.map((i) => (i.clientId === clientId ? { ...i, alt } : i)),
-    );
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="min-w-0 sm:flex-1">
           <h2 className="text-lg font-semibold text-foreground">Media</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Add one or more images. Mark the cover with the star. Alt text is required for each image.
+            Add one or more images. Mark the cover with the star. Alt text is set per language in the translation tabs.
           </p>
         </div>
         <div className="flex flex-col flex-wrap items-start justify-end gap-2 sm:shrink-0 sm:pl-2">
-          <div>
-
           <input
             ref={inputRef}
             type="file"
@@ -223,10 +249,6 @@ function BlogPostMediaSection({ value, onChange, disabled }: BlogPostMediaSectio
             )}
             Add image
           </Button>
-          </div>
-          <p className="max-w-sm text-left text-xs text-muted-foreground sm:max-w-xs sm:text-right">
-            JPG, PNG, WebP, or GIF. Click the star to set the cover image.
-          </p>
         </div>
       </div>
 
@@ -234,16 +256,15 @@ function BlogPostMediaSection({ value, onChange, disabled }: BlogPostMediaSectio
 
       <ul className="flex flex-wrap gap-3 p-0">
         {withUrl.map((item) => (
-          <li key={item.clientId} className="flex min-w-0 flex-col gap-2 w-[150px]">
+          <li key={item.clientId} className="flex min-w-0 w-[150px] flex-col gap-2">
             <div className="group relative aspect-square w-full overflow-hidden rounded-xl border border-border bg-muted/30 shadow-sm">
               <Image
                 src={item.url}
-                alt={item.alt || "Blog image"}
+                alt="Blog image"
                 width={150}
                 height={150}
                 unoptimized
                 className="object-cover"
-                // sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
               />
               <div
                 className={cn(
@@ -284,15 +305,6 @@ function BlogPostMediaSection({ value, onChange, disabled }: BlogPostMediaSectio
                 </span>
               ) : null}
             </div>
-            <Input
-              id={`img-alt-${item.clientId}`}
-              value={item.alt}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setAlt(item.clientId, e.target.value)}
-              disabled={disabled}
-              placeholder="Alt text *"
-              className="h-9 w-full text-xs"
-              aria-label="Image alt text"
-            />
           </li>
         ))}
       </ul>
@@ -300,177 +312,55 @@ function BlogPostMediaSection({ value, onChange, disabled }: BlogPostMediaSectio
   );
 }
 
-type MetadataFieldsBlockProps = {
-  form: UseFormReturn<BlogPostFormValues>;
-  isSubmitting: boolean;
-  mode: "create" | "edit";
-};
-
-function BlogPostMetadataFields({ form, isSubmitting, mode }: MetadataFieldsBlockProps) {
-  const [tagInput, setTagInput] = useState("");
-
-  const addTag = () => {
-    const parts = tagInput
-      .split(/[,\n]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (parts.length === 0) return;
-    const cur: string[] = form.getValues("tags") || [];
-    const next = [...cur];
-    for (const t of parts) {
-      if (!next.includes(t)) next.push(t);
-    }
-    form.setValue("tags", next, { shouldDirty: true, shouldTouch: true });
-    setTagInput("");
-  };
-
-  return (
-    // add the collapsible section here
-    <div className="space-y-6 border-t border-border pt-6">
-      <h2 className="text-lg font-semibold text-foreground">Metadata</h2>
-      <div className="grid grid-cols-12 gap-3">
-        <div className="col-span-12 md:col-span-6">
-          <FormField
-            control={form.control}
-            name="tags"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Tags</FormLabel>
-                <FormControl>
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
-                      <Input
-                        value={tagInput}
-                        onChange={(e) => setTagInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            addTag();
-                          }
-                        }}
-                        placeholder="Comma or type and add"
-                        disabled={isSubmitting}
-                        autoComplete="off"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        onClick={addTag}
-                        disabled={isSubmitting || !tagInput.trim()}
-                        aria-label="Add tag"
-                        className="bg-primary text-primary-foregroundl"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {(field.value || []).map((item: string) => (
-                        <Badge key={item} variant="secondary" className="flex items-center gap-1 pr-0.5">
-                          {item}
-                          <button
-                            type="button"
-                            onClick={() => field.onChange((field.value || []).filter((x: string) => x !== item))}
-                            className="rounded-full p-0.5 hover:bg-muted-foreground/20"
-                            disabled={isSubmitting}
-                            aria-label={`Remove ${item}`}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className="col-span-12 md:col-span-6">
-          <FormField
-            control={form.control}
-            name="read_time"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Read time (minutes)</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    min={1}
-                    disabled={isSubmitting}
-                    name={field.name}
-                    onBlur={field.onBlur}
-                    ref={field.ref}
-                    value={Number.isFinite(field.value) ? field.value : ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      field.onChange(v === "" ? 0 : Math.max(1, Number(v) || 1));
-                    }}
-                  />
-                </FormControl>
-                <p className="text-xs text-muted-foreground">
-                  {mode === "create"
-                    ? "Estimated from the body while you type unless you edit this field."
-                    : "Minutes to read; change if you want a custom value."}
-                </p>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function BlogPostForm({ mode, categories, initial }: BlogPostFormProps) {
   const router = useRouter();
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const prevTitle = useRef(initial?.title ?? "");
+  const [activeLocale, setActiveLocale] = useState<AppLocale>("en");
+  const prevEnglishTitle = useRef(initial?.translations.en?.title ?? "");
+  const { autoTranslate, loadingLocale, error: translateError, clearError } = useBlogAutoTranslate();
 
   const form = useForm<BlogPostFormValues>({
     defaultValues: buildDefaults(initial, categories),
   });
 
-  // Ensure `images` is part of RHF state (media uses `setValue` only) so submit/dirty behaviour is consistent.
   useEffect(() => {
     void form.register("images");
+    void form.register("translations");
   }, [form]);
 
-  const contentW = useWatch({ control: form.control, name: "content" });
+  const imagesW = useWatch({ control: form.control, name: "images" });
+  const translationsW = useWatch({ control: form.control, name: "translations" });
   const { dirtyFields } = useFormState({ control: form.control });
   const readTimeTouched = Boolean(dirtyFields.read_time);
+  const english = translationsW?.en ?? emptyLocaleState();
+  const activeTranslation = translationsW?.[activeLocale] ?? emptyLocaleState();
+  const englishAutoTranslateError = useMemo(
+    () => getEnglishBlogSourceError(english),
+    [english],
+  );
 
-  const excerptW = useWatch({ control: form.control, name: "excerpt" }) ?? "";
-  const metaTitleW = useWatch({ control: form.control, name: "meta_title" }) ?? "";
-  const metaDescW = useWatch({ control: form.control, name: "meta_description" }) ?? "";
-
-  // Auto slug from title until the user diverges (slug kept in sync with previous title’s slug)
-  const titleW = useWatch({ control: form.control, name: "title" });
-  const slugW = useWatch({ control: form.control, name: "slug" });
   useEffect(() => {
-    const t = (titleW ?? "") as string;
-    const s = (slugW ?? "") as string;
-    if (!t.trim()) {
-      form.setValue("slug", "", { shouldValidate: true, shouldDirty: true });
-      prevTitle.current = t;
+    const title = english.title ?? "";
+    const slug = english.slug ?? "";
+    if (!title.trim()) {
+      form.setValue("translations.en.slug", "", { shouldDirty: true });
+      prevEnglishTitle.current = title;
       return;
     }
-    const fromPrev = titleToSlug(prevTitle.current);
-    if (s === fromPrev || s === "") {
-      form.setValue("slug", titleToSlug(t), { shouldValidate: true, shouldDirty: true });
+    const fromPrev = titleToSlug(prevEnglishTitle.current);
+    if (slug === fromPrev || slug === "") {
+      form.setValue("translations.en.slug", titleToSlug(title), { shouldDirty: true });
     }
-    prevTitle.current = t;
-  }, [titleW, form, slugW]);
+    prevEnglishTitle.current = title;
+  }, [english.title, english.slug, form]);
 
-  // Auto read time from body in create mode when the user has not changed read time
   useEffect(() => {
     if (mode === "edit") return;
     if (readTimeTouched) return;
-    const html = (contentW ?? "") as string;
-    form.setValue("read_time", estimateReadMinutesFromHtml(html), { shouldValidate: true });
-  }, [contentW, readTimeTouched, form, mode]);
+    form.setValue("read_time", estimateReadMinutesFromHtml(english.content ?? ""), {
+      shouldValidate: true,
+    });
+  }, [english.content, readTimeTouched, form, mode]);
 
   const formFields: SubFormConfig[] = useMemo(() => {
     const catOptions = categories.map((c) => ({ label: c.name, value: c.id }));
@@ -481,26 +371,11 @@ export function BlogPostForm({ mode, categories, initial }: BlogPostFormProps) {
     const statusOptions =
       initial?.status === "archived" ? [...baseStatus, { label: "Archived", value: "archived" }] : baseStatus;
 
-    const excerptCount = excerptW.length;
-    const titleCount = metaTitleW.length;
-    const descCount = metaDescW.length;
-
     return [
       {
         subform_title: "Basics",
         collapse: true,
         fields: [
-          { name: "title", label: "Title", type: "text", required: true, cols: 12, mdCols: 6 },
-          {
-            name: "slug",
-            label: "Slug",
-            type: "text",
-            required: true,
-            cols: 12,
-            mdCols: 6,
-            placeholder: "url-friendly-slug",
-            description: "Auto-filled from the title; you can edit.",
-          },
           {
             name: "category_id",
             label: "Category",
@@ -527,83 +402,62 @@ export function BlogPostForm({ mode, categories, initial }: BlogPostFormProps) {
             cols: 12,
             mdCols: 4,
           },
-        ],
-      },
-      {
-        subform_title: "Content & SEO",
-        collapse: true,
-        fields: [
           {
-            name: "excerpt",
-            label: "Excerpt",
-            type: "textarea",
-            required: true,
-            rows: 3,
-            cols: 12,
-            description: `${excerptCount}/160 · A short intro for cards and search (160 characters recommended)`,
-            mdCols: 12,
-          },
-          {
-            name: "meta_title",
-            label: "SEO title (optional)",
-            type: "text",
-            placeholder: "Overrides the page title for search (leave blank to use post title).",
-            cols: 12,
-            mdCols: 6,
-            description: `${titleCount}/60`,
-          },
-          {
-            name: "focus_keyphrase",
-            label: "Focus keyphrase (optional)",
-            type: "text",
-            placeholder: "e.g. family travel in Italy",
+            name: "robots_meta",
+            label: "Robots meta tag",
+            type: "select",
+            options: [
+              { label: "Index, Follow (Default)", value: "index,follow" },
+              { label: "NoIndex, Follow", value: "noindex,follow" },
+              { label: "Index, NoFollow", value: "index,nofollow" },
+              { label: "NoIndex, NoFollow", value: "noindex,nofollow" },
+            ],
             cols: 12,
             mdCols: 6,
           },
           {
-            name: "meta_description",
-            label: "SEO description (optional)",
-            type: "textarea",
-            rows: 2,
+            name: "tags",
+            label: "Tags",
+            type: "array-input",
             cols: 12,
-            mdCols: 12,
-            description: `${descCount}/160`,
+            mdCols: 6,
+            placeholder: "Comma or type and add",
           },
-       
           {
-            name: "content",
-            label: "Body",
-            type: "rich-text",
-            required: true,
-            rows: 8,
+            name: "read_time",
+            label: "Read time (minutes)",
+            type: "number",
             cols: 12,
-            placeholder: "Write the post…",
+            mdCols: 6,
           },
         ],
       },
     ];
-  }, [categories, initial?.status, excerptW.length, metaTitleW.length, metaDescW.length]);
+  }, [categories, initial?.status]);
 
   const onSubmit = async (formData: BlogPostFormValues) => {
     setSubmitError(null);
-    // Fields updated only via `setValue` (e.g. `images` in the media section) are not part of
-    // `formData` unless registered — `getValues` always reflects the latest form state.
+    clearError();
+
     const data: BlogPostFormValues = {
       ...formData,
       images: (form.getValues("images") ?? formData.images) ?? [],
       tags: (form.getValues("tags") ?? formData.tags) ?? [],
+      translations: form.getValues("translations") ?? formData.translations,
     };
+
+    const englishTranslation = data.translations.en;
+    if (!englishTranslation?.title.trim()) {
+      setSubmitError("English title is required.");
+      return;
+    }
 
     if (!data.images.some((i) => i.url.trim())) {
       setSubmitError("Add at least one image.");
       return;
     }
-    if (data.images.some((i) => i.url.trim() && !i.alt.trim())) {
-      setSubmitError("Every image must have alt text.");
-      return;
-    }
 
-    const imagesPayload = galleryToApiPayload(data.images);
+    const imagesPayload = galleryToApiPayload(data.images).map(({ alt: _alt, ...image }) => image);
     if (imagesPayload.length < 1) {
       setSubmitError("Add at least one image.");
       return;
@@ -612,33 +466,68 @@ export function BlogPostForm({ mode, categories, initial }: BlogPostFormProps) {
       setSubmitError("Set exactly one cover image using the star on an image.");
       return;
     }
-    if (data.meta_title.length > 60) {
-      setSubmitError("SEO title must be at most 60 characters (or clear it).");
-      return;
-    }
-    if (data.meta_description.length > 160) {
-      setSubmitError("SEO description must be at most 160 characters (or clear it).");
-      return;
+
+    const apiSlug = titleToSlug((englishTranslation.slug || englishTranslation.title).trim());
+    form.setValue("translations.en.slug", apiSlug, { shouldDirty: true });
+
+    for (const locale of locales) {
+      const translation = data.translations[locale];
+      if (!translation?.title.trim()) continue;
+      for (const image of data.images.filter((item) => item.url.trim())) {
+        if (!translation.image_alts[image.clientId]?.trim()) {
+          setSubmitError(`Every image must have alt text for ${LOCALE_LABELS[locale]}.`);
+          return;
+        }
+      }
     }
 
-    // Slug in the form can contain uppercase, underscores, or pasted text — re-normalize
-    // so the payload always matches the server regex.
-    const apiSlug = titleToSlug((data.slug || data.title).trim());
-    form.setValue("slug", apiSlug, { shouldValidate: true, shouldDirty: true });
+    const trimSeoField = (value: string, max: number): string | null => {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
+    };
+
+    const translationsPayload: Record<string, {
+      title: string;
+      slug: string;
+      content: string;
+      excerpt: string;
+      meta_title: string | null;
+      meta_description: string | null;
+      focus_keyphrase: string | null;
+      canonical_url: string | null;
+      image_alts: Record<string, string>;
+    }> = {};
+
+    for (const locale of locales) {
+      const translation = data.translations[locale];
+      if (!translation?.title.trim()) continue;
+      translationsPayload[locale] = {
+        title: translation.title,
+        slug: locale === "en" ? apiSlug : titleToSlug(translation.slug || translation.title),
+        content: translation.content,
+        excerpt: translation.excerpt,
+        meta_title: trimSeoField(translation.meta_title, 60),
+        meta_description: trimSeoField(translation.meta_description, 160),
+        focus_keyphrase: translation.focus_keyphrase.trim()
+          ? translation.focus_keyphrase.trim()
+          : null,
+        canonical_url: translation.canonical_url.trim()
+          ? translation.canonical_url.trim()
+          : null,
+        image_alts: translation.image_alts,
+      };
+    }
 
     const body = {
-      title: data.title,
-      slug: apiSlug,
-      content: data.content,
-      excerpt: data.excerpt,
+      translations: translationsPayload,
       images: imagesPayload,
       tags: data.tags,
       status: data.status,
       featured: initial?.featured ?? false,
       views_count: initial?.viewsCount ?? 0,
       read_time: Number(data.read_time) || 0,
-      meta_title: data.meta_title.trim() ? data.meta_title.trim() : null,
-      meta_description: data.meta_description.trim() ? data.meta_description.trim() : null,
+      robots_meta: data.robots_meta || "index,follow",
       published_at:
         data.status === "published" && data.published_at
           ? new Date(data.published_at).toISOString()
@@ -660,6 +549,26 @@ export function BlogPostForm({ mode, categories, initial }: BlogPostFormProps) {
     }
   };
 
+  const handleAutoTranslate = async (locale: AppLocale) => {
+    clearError();
+    const source = form.getValues("translations.en");
+    const translated = await autoTranslate(locale, {
+      title: source.title,
+      slug: source.slug,
+      excerpt: source.excerpt,
+      content: source.content,
+      meta_title: source.meta_title,
+      meta_description: source.meta_description,
+      focus_keyphrase: source.focus_keyphrase,
+      image_alts: source.image_alts,
+    });
+    if (!translated) return;
+    form.setValue(`translations.${locale}`, {
+      ...translated,
+      canonical_url: form.getValues(`translations.${locale}.canonical_url`) ?? "",
+    }, { shouldDirty: true });
+  };
+
   if (categories.length === 0) {
     return (
       <p className="text-destructive">
@@ -671,9 +580,9 @@ export function BlogPostForm({ mode, categories, initial }: BlogPostFormProps) {
 
   return (
     <div className="w-full min-w-0 space-y-4">
-      {submitError && (
+      {(submitError || translateError) && (
         <Alert variant="destructive">
-          <AlertDescription>{submitError}</AlertDescription>
+          <AlertDescription>{submitError ?? translateError}</AlertDescription>
         </Alert>
       )}
       <GenericForm
@@ -688,18 +597,59 @@ export function BlogPostForm({ mode, categories, initial }: BlogPostFormProps) {
         className="w-full min-w-0 space-y-8"
       >
         <div className="w-full min-w-0 space-y-6 border-t border-border pt-6">
-        
           <BlogPostMediaSection
-            value={form.watch("images")}
+            value={imagesW ?? []}
             onChange={(next) => form.setValue("images", next, { shouldDirty: true })}
             disabled={form.formState.isSubmitting}
           />
         </div>
 
-        <BlogPostMetadataFields
-          form={form}
+        <div className="space-y-4 border-t border-border pt-6">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold text-foreground">Translations</h2>
+            <p className="text-sm text-muted-foreground">
+              English is required. Other languages can be filled manually or with Auto Translate.
+            </p>
+          </div>
+          <Tabs value={activeLocale} onValueChange={(value) => setActiveLocale(value as AppLocale)}>
+            <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
+              {locales.map((locale) => (
+                <TabsTrigger key={locale} value={locale}>
+                  {LOCALE_LABELS[locale]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {locales.map((locale) => (
+              <TabsContent key={locale} value={locale} className="pt-4">
+                <BlogTranslationTab
+                  locale={locale}
+                  value={translationsW?.[locale] ?? emptyLocaleState()}
+                  images={imagesW ?? []}
+                  disabled={form.formState.isSubmitting}
+                  showAutoTranslate={locale !== "en"}
+                  autoTranslateLoading={loadingLocale === locale}
+                  autoTranslateDisabledReason={locale !== "en" ? englishAutoTranslateError : null}
+                  onAutoTranslate={() => void handleAutoTranslate(locale)}
+                  onChange={(next) =>
+                    form.setValue(`translations.${locale}`, next, { shouldDirty: true })
+                  }
+                />
+              </TabsContent>
+            ))}
+          </Tabs>
+        </div>
+
+        <SeoToolsSection
+          title={activeTranslation.title}
+          metaTitle={activeTranslation.meta_title}
+          metaDescription={activeTranslation.meta_description}
+          slug={activeTranslation.slug}
+          content={activeTranslation.content}
+          excerpt={activeTranslation.excerpt}
+          focusKeyphrase={activeTranslation.focus_keyphrase}
+          tags={form.getValues("tags") ?? []}
+          postId={initial?.id}
           isSubmitting={form.formState.isSubmitting}
-          mode={mode}
         />
       </GenericForm>
     </div>

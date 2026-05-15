@@ -362,7 +362,7 @@
       "payNowOrHoldTitle": "Payer maintenant ou mettre en option",
       "payNowOrHoldIntro": "Payer maintenant confirme immédiatement avec la compagnie. L’option maintient le tarif pendant que vous finalisez (si activé pour votre compte).",
       "payNowTitle": "Payer maintenant",
-      "payNowDescription": "Paiement par carte via Duffel. Votre réservation est confirmée après un paiement réussi.",
+      "payNowDescription": "Paiement par carte via Duffel (traité par Stripe). Votre carte est débitée lors de la validation ici ; nous finalisons la réservation auprès de la compagnie seulement après ce succès. Si la compagnie ne confirme pas, un remboursement automatique est lancé lorsque c’est possible.",
       "holdOrderTitle": "Option sans paiement",
       "holdOrderDescription": "Placez une option sans débiter votre carte. Payez avant expiration de l’option.",
       "holdDisabledHint": "Le paiement avec option n’est pas encore activé. Définissez FLIGHT_HOLD_BACKEND et NEXT_PUBLIC_FLIGHT_HOLD_BACKEND lorsque votre compte Duffel prend en charge les options.",
@@ -424,7 +424,8 @@
       "errorCouldNotStartPayment": "Impossible de démarrer le paiement",
       "errorCouldNotPlaceHold": "Impossible de placer l’option",
       "errorBookingFailedAfterPayment": "Échec de la réservation après paiement",
-      "errorCardPaymentFailed": "Échec du paiement par carte"
+      "errorCardPaymentFailed": "Échec du paiement par carte",
+      "duffelPaymentsStripeHint": "Lors du paiement, votre navigateur peut appeler Stripe (identifiants pi_…). C’est le processeur de carte de Duffel qui encaisse avant la confirmation du billet. Votre référence Duffel est un pit_…. Dans le tableau Duffel, les lignes « Order » débitent le solde après cet encaissement — la charge carte peut apparaître sous Paiements ou sur une autre ligne, pas toujours dans la colonne « Charge » à côté de la commande."
     },
     "results": {
       "searchFailed": "Échec de la recherche de vols",

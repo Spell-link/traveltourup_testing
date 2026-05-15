@@ -39,6 +39,7 @@ export function BlogArticleJsonLd({ blog, locale }: BlogArticleJsonLdProps) {
     },
     mainEntityOfPage: { "@type": "WebPage", "@id": pageUrl },
     url: pageUrl,
+    inLanguage: locale,
     ...(images.length ? { image: images } : {}),
   };
 

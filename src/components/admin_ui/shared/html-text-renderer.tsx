@@ -3,7 +3,8 @@
 import React from 'react';
 import DOMPurify from 'dompurify';
 import { cn } from '@/lib/utils';
-
+// @ts-ignore
+import "./html-renderer.css"; // Import CSS for mention styling
 /**
  * Clean up escaped HTML entities and old mention spans from content
  */
@@ -122,15 +123,26 @@ export function HtmlTextRenderer({
   // Helper function to sanitize HTML content using DOMPurify
   const sanitizeHtml = (html: string): string => {
     if (typeof window === 'undefined') return html;
-    const sanitized = DOMPurify.sanitize(html, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'a', 'span', 'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
-      ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'data-user-id', 'data-user-name', 'data-type', 'data-mention-id', 'data-mention-label', 'contenteditable', 'style'],
+
+    const sanitized = DOMPurify.sanitize(cleanEscapedHtml(html), {
+      ALLOWED_TAGS: [
+        'a', 'abbr', 'b', 'blockquote', 'br', 'code', 'del', 'div', 'em', 'figcaption', 'figure',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'kbd', 'li', 'mark', 'ol', 'p',
+        'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
+        'td', 'tfoot', 'th', 'thead', 'time', 'tr', 'u', 'ul', 'var', 'details', 'summary'
+      ],
+      ALLOWED_ATTR: [
+        'href', 'target', 'rel', 'class', 'id', 'src', 'alt', 'title', 'width', 'height',
+        'loading', 'data-user-id', 'data-user-name', 'data-type', 'data-mention-id',
+        'data-mention-label'
+      ],
       ALLOW_DATA_ATTR: true,
       FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'link', 'meta', 'form', 'input', 'button'],
       FORBID_ATTR: ['onclick', 'onload', 'onerror', 'onmouseover', 'onfocus', 'onblur', 'onchange', 'onsubmit'],
       ADD_ATTR: ['target'],
       USE_PROFILES: { html: true }
     });
+
     return highlightMentions(sanitized);
   };
 
