@@ -6,6 +6,12 @@ import { prisma } from "@/lib/prisma";
 import { bookingFinancialEventRepository } from "@/lib/db/repositories/booking-financial-event.repository";
 import { getDuffelPaymentRefund } from "@/lib/duffel/refunds";
 import { DuffelApiError } from "@/lib/duffel/errors";
+import {
+  applyCancellationRefundRemoteStatus,
+  applyCompensationRefundRemoteStatus,
+  retryCompensationRefundForPit,
+} from "@/lib/services/flights/flight-refund.service";
+import { isDuffelRefundPending } from "@/lib/services/flights/flight-refund.core";
 
 /**
  * Reconciliation jobs for the flight saga. Each handler is idempotent and
@@ -15,11 +21,17 @@ import { DuffelApiError } from "@/lib/duffel/errors";
 const MIN_ORPHAN_PIT_AGE_MS = 10 * 60 * 1000;
 const MAX_PIT_ROWS_PER_SWEEP = 50;
 const MAX_REFUND_ROWS_PER_POLL = 50;
+const MAX_COMPENSATION_ROWS_PER_POLL = 50;
 const MAX_CANCELLATION_ROWS_PER_SWEEP = 100;
+
+function isOrphanPitAutoRefundEnabled(): boolean {
+  return process.env.FLIGHT_ORPHAN_PIT_AUTO_REFUND === "1";
+}
 
 export type OrphanPitSweepResult = {
   scanned: number;
   alerted: number;
+  auto_refunded: number;
   pit_ids: string[];
 };
 
@@ -49,39 +61,73 @@ export async function sweepOrphanFlightPaymentIntents(
 
   const pitIds: string[] = [];
   let alerted = 0;
+  let autoRefunded = 0;
+
+  const alreadyAlertedRows =
+    candidates.length > 0
+      ? await prisma.bookingFinancialEvent.findMany({
+          where: {
+            flight_payment_intent_record_id: { in: candidates.map((c) => c.id) },
+            type: "intent_failed",
+          },
+          select: { flight_payment_intent_record_id: true },
+        })
+      : [];
+  const alreadyAlertedPitIds = new Set(
+    alreadyAlertedRows
+      .map((r) => r.flight_payment_intent_record_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+
   for (const pit of candidates) {
-    const already = await prisma.bookingFinancialEvent.findFirst({
-      where: {
-        flight_payment_intent_record_id: pit.id,
-        type: "intent_failed",
-      },
-    });
-    if (already) {
-      pitIds.push(pit.duffel_intent_id);
-      continue;
-    }
-    try {
-      await bookingFinancialEventRepository.record({
-        type: "intent_failed",
-        flight_payment_intent_record_id: pit.id,
-        amount: pit.charge_amount,
-        currency: pit.charge_currency,
+    const already = alreadyAlertedPitIds.has(pit.id);
+    if (!already) {
+      try {
+        await bookingFinancialEventRepository.record({
+          type: "intent_failed",
+          flight_payment_intent_record_id: pit.id,
+          amount: pit.charge_amount,
+          currency: pit.charge_currency,
+          request_id: options.requestId ?? null,
+          payload: {
+            reason: "orphan_succeeded_intent",
+            duffel_intent_id: pit.duffel_intent_id,
+            offer_id: pit.offer_id,
+          } as Prisma.InputJsonValue,
+        });
+      } catch {
+        // best-effort
+      }
+      logger.error("Flight payment intent orphan detected", {
         request_id: options.requestId ?? null,
-        payload: {
-          reason: "orphan_succeeded_intent",
-          duffel_intent_id: pit.duffel_intent_id,
-          offer_id: pit.offer_id,
-        } as Prisma.InputJsonValue,
+        pit_id: pit.duffel_intent_id,
+        error_code: "ORPHAN_PIT_SUCCEEDED",
       });
-    } catch {
-      // best-effort
+      alerted += 1;
     }
-    logger.error("Flight payment intent orphan detected", {
-      request_id: options.requestId ?? null,
-      pit_id: pit.duffel_intent_id,
-      error_code: "ORPHAN_PIT_SUCCEEDED",
-    });
-    alerted += 1;
+
+    if (isOrphanPitAutoRefundEnabled()) {
+      try {
+        const result = await retryCompensationRefundForPit({
+          duffelIntentId: pit.duffel_intent_id,
+          terminalCodeOverride: "ORPHAN_PIT_AUTO_REFUNDED",
+        });
+        if (
+          result.terminal_code === "ORPHAN_PIT_AUTO_REFUNDED" ||
+          result.terminal_code === "BOOKING_FAILED_REFUNDED" ||
+          result.terminal_code === "BOOKING_FAILED_REFUND_PENDING"
+        ) {
+          autoRefunded += 1;
+        }
+      } catch (e) {
+        logger.warn("Orphan PIT auto-refund failed", {
+          request_id: options.requestId ?? null,
+          pit_id: pit.duffel_intent_id,
+          error_code: e instanceof DuffelApiError ? e.firstDuffelErrorCode : "AUTO_REFUND_ERROR",
+        });
+      }
+    }
+
     pitIds.push(pit.duffel_intent_id);
   }
 
@@ -89,8 +135,10 @@ export async function sweepOrphanFlightPaymentIntents(
     request_id: options.requestId ?? null,
     scanned: candidates.length,
     alerted,
+    auto_refunded: autoRefunded,
+    auto_refund_enabled: isOrphanPitAutoRefundEnabled(),
   });
-  return { scanned: candidates.length, alerted, pit_ids: pitIds };
+  return { scanned: candidates.length, alerted, auto_refunded: autoRefunded, pit_ids: pitIds };
 }
 
 export type RefundPollResult = {
@@ -115,7 +163,10 @@ export async function pollPendingFlightRefunds(
     },
     orderBy: { updated_at: "asc" },
     take: MAX_REFUND_ROWS_PER_POLL,
-    include: { booking: true },
+    include: {
+      booking: true,
+      flightOrderCancellation: true,
+    },
   });
 
   let succeeded = 0;
@@ -124,85 +175,32 @@ export async function pollPendingFlightRefunds(
 
   for (const attempt of attempts) {
     const refundId = attempt.duffel_refund_id;
-    if (!refundId) continue;
+    if (!refundId || !attempt.booking) continue;
     try {
       const refund = await getDuffelPaymentRefund(refundId);
-      const st = (refund.status ?? "").toLowerCase();
-      if (st === "succeeded" || st === "completed") {
-        const refundedAmount = Number.parseFloat(attempt.amount ?? "0");
-        const bookingTotal = Number.parseFloat(
-          attempt.booking?.total_amount.toString() ?? "0",
-        );
-        const fully = bookingTotal > 0 && refundedAmount + 0.005 >= bookingTotal;
-        const payStatus = fully ? "refunded" : "partially_refunded";
-        await prisma.$transaction([
-          prisma.flightPaymentRefundAttempt.update({
-            where: { id: attempt.id },
-            data: {
-              status: "succeeded",
-              raw: refund as unknown as Prisma.InputJsonValue,
-              error_code: null,
-            },
-          }),
-          prisma.booking.update({
-            where: { id: attempt.booking_id },
-            data: { payment_status: payStatus },
-          }),
-        ]);
-        try {
-          await bookingFinancialEventRepository.record({
-            type: "refund_succeeded",
-            booking_id: attempt.booking_id,
-            flight_payment_intent_record_id: attempt.flight_payment_intent_record_id,
-            amount: attempt.amount,
-            currency: attempt.currency,
-            request_id: options.requestId ?? null,
-            payload: {
-              duffel_refund_id: refundId,
-              partial: !fully,
-              poll_source: "ops.poll-refunds",
-            } as Prisma.InputJsonValue,
-          });
-        } catch {
-          // ignore
-        }
-        succeeded += 1;
-      } else if (st === "failed" || st === "canceled") {
-        await prisma.$transaction([
-          prisma.flightPaymentRefundAttempt.update({
-            where: { id: attempt.id },
-            data: {
-              status: "failed",
-              raw: refund as unknown as Prisma.InputJsonValue,
-              error_code: "DUFFEL_REFUND_FAILED",
-            },
-          }),
-          prisma.booking.update({
-            where: { id: attempt.booking_id },
-            data: { payment_status: "refund_failed" },
-          }),
-        ]);
-        try {
-          await bookingFinancialEventRepository.record({
-            type: "refund_failed",
-            booking_id: attempt.booking_id,
-            flight_payment_intent_record_id: attempt.flight_payment_intent_record_id,
-            amount: attempt.amount,
-            currency: attempt.currency,
-            request_id: options.requestId ?? null,
-            payload: {
-              duffel_refund_id: refundId,
-              poll_source: "ops.poll-refunds",
-              refund_status: st,
-            } as Prisma.InputJsonValue,
-          });
-        } catch {
-          // ignore
-        }
-        failed += 1;
-      } else {
-        pending += 1;
-      }
+      const outcome = await applyCancellationRefundRemoteStatus({
+        attempt: {
+          id: attempt.id,
+          status: attempt.status,
+          booking_id: attempt.booking_id,
+          flight_order_cancellation_id: attempt.flight_order_cancellation_id,
+          flight_payment_intent_record_id: attempt.flight_payment_intent_record_id,
+          amount: attempt.amount,
+          currency: attempt.currency,
+          duffel_refund_id: attempt.duffel_refund_id,
+        },
+        bookingTotalAmount: attempt.booking.total_amount,
+        refundAmountQuoted:
+          attempt.flightOrderCancellation?.refund_amount ?? attempt.amount,
+        remote: refund,
+        source: {
+          poll_source: "ops.poll-refunds",
+          request_id: options.requestId ?? null,
+        },
+      });
+      if (outcome === "succeeded") succeeded += 1;
+      else if (outcome === "failed") failed += 1;
+      else pending += 1;
     } catch (e) {
       const code = e instanceof DuffelApiError ? e.firstDuffelErrorCode : undefined;
       logger.warn("Duffel refund poll error", {
@@ -222,6 +220,76 @@ export async function pollPendingFlightRefunds(
     pending,
   });
   return { scanned: attempts.length, succeeded, failed, pending };
+}
+
+export type CompensationRefundPollResult = {
+  scanned: number;
+  succeeded: number;
+  failed: number;
+  pending: number;
+};
+
+/**
+ * Poll pending checkout-failure / orphan compensation refunds stored on PIT rows.
+ */
+export async function pollPendingCompensationRefunds(
+  options: { requestId?: string } = {},
+): Promise<CompensationRefundPollResult> {
+  const pits = await prisma.flightPaymentIntentRecord.findMany({
+    where: {
+      order_failure_refund_id: { not: null },
+      OR: [
+        { order_failure_refund_status: null },
+        { order_failure_refund_status: { in: ["pending", "processing"] } },
+      ],
+    },
+    orderBy: { updated_at: "asc" },
+    take: MAX_COMPENSATION_ROWS_PER_POLL,
+  });
+
+  let succeeded = 0;
+  let failed = 0;
+  let pending = 0;
+
+  for (const pit of pits) {
+    const refundId = pit.order_failure_refund_id;
+    if (!refundId) continue;
+    if (!isDuffelRefundPending(pit.order_failure_refund_status)) {
+      continue;
+    }
+    try {
+      const refund = await getDuffelPaymentRefund(refundId);
+      const outcome = await applyCompensationRefundRemoteStatus({
+        pit,
+        remote: refund,
+        source: {
+          poll_source: "ops.poll-compensation-refunds",
+          request_id: options.requestId ?? null,
+        },
+      });
+      if (outcome === "succeeded") succeeded += 1;
+      else if (outcome === "failed") failed += 1;
+      else pending += 1;
+    } catch (e) {
+      const code = e instanceof DuffelApiError ? e.firstDuffelErrorCode : undefined;
+      logger.warn("Duffel compensation refund poll error", {
+        request_id: options.requestId ?? null,
+        duffel_refund_id: refundId,
+        pit_id: pit.duffel_intent_id,
+        error_code: code ?? "POLL_ERROR",
+      });
+      pending += 1;
+    }
+  }
+
+  logger.info("Compensation refund poll complete", {
+    request_id: options.requestId ?? null,
+    scanned: pits.length,
+    succeeded,
+    failed,
+    pending,
+  });
+  return { scanned: pits.length, succeeded, failed, pending };
 }
 
 export type ExpireQuotesResult = {
@@ -261,6 +329,45 @@ export async function expireStaleCancellationQuotes(
     data: { status: "expired" },
   });
   logger.info("Cancellation quote expiry sweep complete", {
+    request_id: options.requestId ?? null,
+    scanned: stale.length,
+    expired: result.count,
+  });
+  return { scanned: stale.length, expired: result.count };
+}
+
+const MAX_ORDER_CHANGE_ROWS_PER_SWEEP = 100;
+
+/**
+ * Mark `FlightOrderChange` rows whose `quote_expires_at` is in the past but are
+ * still `quoted` or `pending_payment` as `expired`.
+ */
+export async function expireStaleOrderChangeQuotes(
+  options: { requestId?: string } = {},
+): Promise<ExpireQuotesResult> {
+  const now = new Date();
+  const stale = await prisma.flightOrderChange.findMany({
+    where: {
+      status: { in: ["quoted", "pending_payment"] },
+      quote_expires_at: { lt: now },
+    },
+    orderBy: { quote_expires_at: "asc" },
+    take: MAX_ORDER_CHANGE_ROWS_PER_SWEEP,
+    select: { id: true },
+  });
+
+  if (stale.length === 0) {
+    logger.info("Order change quote expiry sweep — nothing to do", {
+      request_id: options.requestId ?? null,
+    });
+    return { scanned: 0, expired: 0 };
+  }
+
+  const result = await prisma.flightOrderChange.updateMany({
+    where: { id: { in: stale.map((r) => r.id) } },
+    data: { status: "expired" },
+  });
+  logger.info("Order change quote expiry sweep complete", {
     request_id: options.requestId ?? null,
     scanned: stale.length,
     expired: result.count,

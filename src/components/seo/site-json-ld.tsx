@@ -25,10 +25,10 @@ export function SiteJsonLd({ locale: _locale }: SiteJsonLdProps) {
     name: SITE_NAME,
     url: base,
     logo: logoUrl,
-    address: {
-      "@type": "PostalAddress",
-      streetAddress: CONTACT.address,
-    },
+    // address: {
+    //   "@type": "PostalAddress",
+    //   streetAddress: CONTACT.address,
+    // },
     contactPoint: [
       {
         "@type": "ContactPoint",

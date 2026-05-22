@@ -1,18 +1,9 @@
-import Navbar from "@/components/shared/Navbar";
-import Breadcrumb from "@/components/shared/Breadcrumb";
-import Footer from "@/components/shared/Footer";
+import { MarketingLayoutClient } from "@/app/[locale]/(marketing)/MarketingLayoutClient";
 
 export default function MarketingLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <>
-        <Navbar />
-        <Breadcrumb />
-        {children}
-        <Footer />
-    </>
-  );
+  return <MarketingLayoutClient>{children}</MarketingLayoutClient>;
 }

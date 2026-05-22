@@ -54,6 +54,10 @@ export type FlightOfferDTO = {
   passengers: FlightOfferPassengerDTO[];
   /** Baggage and other offer-level services (not seats; seats come from seat maps). */
   available_services: FlightOfferServiceDTO[];
+  /** When true, passport (or supported doc types) required on every passenger at booking. */
+  passenger_identity_documents_required: boolean;
+  /** e.g. passport, tax_id, known_traveler_number, passenger_redress_number */
+  supported_passenger_identity_document_types: string[];
 };
 
 function pickIata(airport: unknown): string {
@@ -260,5 +264,14 @@ export function mapDuffelOfferToDto(raw: unknown): FlightOfferDTO {
     slices,
     passengers,
     available_services,
+    passenger_identity_documents_required:
+      offer.passenger_identity_documents_required === true,
+    supported_passenger_identity_document_types: Array.isArray(
+      offer.supported_passenger_identity_document_types,
+    )
+      ? (offer.supported_passenger_identity_document_types as unknown[]).filter(
+          (t): t is string => typeof t === "string",
+        )
+      : [],
   };
 }

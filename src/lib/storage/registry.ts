@@ -1,11 +1,13 @@
 import { z } from "zod";
 import type { StorageVariantConfig, StorageVariantId } from "@/lib/storage/types";
 import { blogImagesVariant } from "@/lib/storage/variants/blog-images.variant";
+import { flightTicketsVariant } from "@/lib/storage/variants/flight-tickets.variant";
 import { userAvatarVariant } from "@/lib/storage/variants/user-avatar.variant";
 
 const REGISTRY: Record<StorageVariantId, StorageVariantConfig> = {
   "blog-images": blogImagesVariant,
   "user-avatar": userAvatarVariant,
+  "flight-tickets": flightTicketsVariant,
 };
 
 export const storageVariantIdSchema = z.enum(

@@ -152,8 +152,8 @@ const HomeView = ({ blogSection }: HomeViewProps): React.ReactElement => {
   return (
     <div>
       <HeroSection />
-      <section className="bg-background">
-        <div className="py-8 md:py-16   px-4 md:px-10 grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-12 items-stretch container mx-auto">
+      <section className="bg-muted/60">
+        <div className="px-4 md:px-10 grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-12 items-stretch container mx-auto">
           <div className="lg:col-span-6 h-full flex">
             <Card variant="history" data={historyCardData} className="my-auto w-full" />
           </div>
@@ -164,7 +164,7 @@ const HomeView = ({ blogSection }: HomeViewProps): React.ReactElement => {
         </div>
       </section>
       <FeaturedFlights />
-      <FeaturedHotelsWithFetch fallbackHotels={hotelsData} featuredAd={featuredAd} />
+      <FeaturedHotelsWithFetch fallbackHotels={hotelsData} featuredAd={featuredAd} bgColor="bg-muted/60"/>
       <RecommendedCars featuredCar={featuredCarData} cars={carsData} />
       <Categories categories={categoriesData} />
       {blogSection}

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import Image from "next/image";
+import { cn } from "@/lib/utils";
 
 const images: string[] = [
   "/images/hotels/hotel6.jpg",
@@ -18,70 +19,47 @@ const imageAlts: string[] = [
   "Urban skyline hotel and twilight city lights",
 ];
 
-type MotionPreset = {
-  initial: {
-    opacity: number;
-    x: string | number;
-    y: string | number;
-    scale: number;
-    filter?: string;
-  };
-  animate: {
-    opacity: number;
-    x: string | number;
-    y: string | number;
-    scale: number;
-    filter?: string;
-  };
-  exit: {
-    opacity: number;
-    x: string | number;
-    y: string | number;
-    scale: number;
-    filter?: string;
-  };
+type FadePreset = {
+  initial: { opacity: number; x: string };
+  animate: { opacity: number; x: string };
+  exit: { opacity: number; x: string };
 };
 
 type SlideState = {
   image: string;
   imageIndex: number;
-  motion: MotionPreset;
+  preset: FadePreset;
   key: number;
 };
 
-/** Soft, horizon-forward transitions — suggest journey / landscape, not chaotic spins */
-const motionPresets: MotionPreset[] = [
+/** Opacity + gentle horizontal drift only — no blur or scale on the photo layer (avoids soft/pixelated frames). */
+const fadePresets: FadePreset[] = [
   {
-    initial: { opacity: 0, x: "8%", y: 0, scale: 1.12, filter: "blur(12px)" },
-    animate: { opacity: 1, x: 0, y: 0, scale: 1, filter: "blur(0px)" },
-    exit: { opacity: 0, x: "-5%", y: 0, scale: 1.04, filter: "blur(6px)" },
+    initial: { opacity: 0, x: "2.5%" },
+    animate: { opacity: 1, x: "0%" },
+    exit: { opacity: 0, x: "-1.5%" },
   },
   {
-    initial: { opacity: 0, x: "-8%", y: 0, scale: 1.1, filter: "blur(10px)" },
-    animate: { opacity: 1, x: 0, y: 0, scale: 1, filter: "blur(0px)" },
-    exit: { opacity: 0, x: "6%", y: 0, scale: 1.06, filter: "blur(8px)" },
+    initial: { opacity: 0, x: "-2.5%" },
+    animate: { opacity: 1, x: "0%" },
+    exit: { opacity: 0, x: "1.5%" },
   },
   {
-    initial: { opacity: 0, x: 0, y: "6%", scale: 1.08, filter: "blur(14px)" },
-    animate: { opacity: 1, x: 0, y: 0, scale: 1, filter: "blur(0px)" },
-    exit: { opacity: 0, x: 0, y: "-4%", scale: 1.05, filter: "blur(6px)" },
+    initial: { opacity: 0, x: "1.5%" },
+    animate: { opacity: 1, x: "0%" },
+    exit: { opacity: 0, x: "-2%" },
   },
   {
-    initial: { opacity: 0, x: 0, y: "-5%", scale: 1.06, filter: "blur(12px)" },
-    animate: { opacity: 1, x: 0, y: 0, scale: 1, filter: "blur(0px)" },
-    exit: { opacity: 0, x: 0, y: "5%", scale: 1.08, filter: "blur(10px)" },
-  },
-  {
-    initial: { opacity: 0, x: "5%", y: "4%", scale: 1.14, filter: "blur(16px)" },
-    animate: { opacity: 1, x: 0, y: 0, scale: 1, filter: "blur(0px)" },
-    exit: { opacity: 0, x: "-4%", y: "-3%", scale: 1.02, filter: "blur(8px)" },
+    initial: { opacity: 0, x: "-1.5%" },
+    animate: { opacity: 1, x: "0%" },
+    exit: { opacity: 0, x: "2%" },
   },
 ];
 
-const motionPresetsReduced: MotionPreset[] = motionPresets.map((p) => ({
-  initial: { ...p.initial, x: 0, y: 0, scale: 1, filter: "none" },
-  animate: { ...p.animate, filter: "none" },
-  exit: { ...p.exit, x: 0, y: 0, scale: 1, filter: "none" },
+const fadePresetsReduced: FadePreset[] = fadePresets.map((p) => ({
+  initial: { opacity: 0, x: "0%" },
+  animate: { opacity: 1, x: "0%" },
+  exit: { opacity: 0, x: "0%" },
 }));
 
 function getRandomItem<T>(items: T[], excludeIndex?: number): { item: T; index: number } {
@@ -100,89 +78,85 @@ function getRandomItem<T>(items: T[], excludeIndex?: number): { item: T; index: 
   return { item: items[nextIndex], index: nextIndex };
 }
 
-const SLIDE_INTERVAL_MS = 5000;
-
-const travelEase = [0.25, 0.46, 0.45, 0.94] as const;
+const SLIDE_INTERVAL_MS = 5500;
+const CROSSFADE_DURATION_S = 1.1;
+const travelEase = [0.4, 0, 0.2, 1] as const;
 
 export default function RandomImageAnimation() {
   const reduceMotion = useReducedMotion();
   const [isPaused, setIsPaused] = useState(false);
-  const presets = reduceMotion ? motionPresetsReduced : motionPresets;
+  const presets = reduceMotion ? fadePresetsReduced : fadePresets;
 
   const [slide, setSlide] = useState<SlideState>(() => ({
     image: images[0],
     imageIndex: 0,
-    motion: presets[0],
+    preset: presets[0],
     key: 0,
   }));
 
-  const getRandomImage = () => {
+  const advanceSlide = useCallback(() => {
     setSlide((current) => {
-      const { item: nextImage, index: nextImageIndex } = getRandomItem(
-        images,
-        current.imageIndex
-      );
-      const { item: nextMotion } = getRandomItem(
-        presets,
-        presets.indexOf(current.motion)
-      );
+      const { item: nextImage, index: nextImageIndex } = getRandomItem(images, current.imageIndex);
+      const presetIndex = presets.indexOf(current.preset);
+      const { item: nextPreset } = getRandomItem(presets, presetIndex >= 0 ? presetIndex : undefined);
 
       return {
         image: nextImage,
         imageIndex: nextImageIndex,
-        motion: nextMotion,
+        preset: nextPreset,
         key: current.key + 1,
       };
     });
-  };
+  }, [presets]);
+
+  useEffect(() => {
+    images.forEach((src, i) => {
+      if (i === 0) return;
+      const img = new window.Image();
+      img.src = src;
+    });
+  }, []);
 
   useEffect(() => {
     if (isPaused) return;
 
-    const interval = setInterval(() => {
-      getRandomImage();
-    }, SLIDE_INTERVAL_MS);
-
+    const interval = setInterval(advanceSlide, SLIDE_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [isPaused]);
+  }, [isPaused, advanceSlide]);
 
-  const transitionDuration = reduceMotion ? 0.35 : 1.15;
+  const crossfadeDuration = reduceMotion ? 0.4 : CROSSFADE_DURATION_S;
+  const kenBurnsDuration = reduceMotion ? 0 : (SLIDE_INTERVAL_MS - crossfadeDuration * 1000) / 1000;
 
   return (
     <div
-      className="group relative h-full w-full overflow-hidden rounded-2xl ring-1 ring-border/60 shadow-lg"
+      className="group relative h-full min-h-[inherit] w-full overflow-hidden rounded-2xl ring-1 ring-border/60 shadow-lg"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
-      {/* Subtle inner frame */}
       <div
         className="pointer-events-none absolute inset-0 z-20 rounded-2xl ring-1 ring-inset ring-white/10"
         aria-hidden
       />
 
-      <AnimatePresence mode="sync">
+      <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={slide.key}
-          className="absolute inset-0"
-          initial={slide.motion.initial}
-          animate={slide.motion.animate}
-          exit={slide.motion.exit}
+          className="absolute inset-0 overflow-hidden"
+          initial={slide.preset.initial}
+          animate={slide.preset.animate}
+          exit={slide.preset.exit}
           transition={{
-            duration: transitionDuration,
+            duration: crossfadeDuration,
             ease: travelEase,
           }}
         >
-          {/* Ken Burns–style slow zoom while slide is visible (pause-friendly) */}
+          {/* Overscan wrapper: image is larger than the frame so Ken Burns zoom stays sharp */}
           <motion.div
-            className="absolute inset-0 h-full w-full"
-            initial={reduceMotion ? { scale: 1 } : { scale: 1.04 }}
-            animate={
-              reduceMotion
-                ? { scale: 1 }
-                : { scale: 1.12 }
-            }
+            className="absolute left-1/2 top-1/2 h-[115%] w-[115%] -translate-x-1/2 -translate-y-1/2 will-change-transform [transform:translateZ(0)] relative"
+            initial={reduceMotion ? { scale: 1 } : { scale: 1 }}
+            animate={reduceMotion ? { scale: 1 } : { scale: 1.06 }}
             transition={{
-              duration: SLIDE_INTERVAL_MS / 1000 - 0.2,
+              duration: kenBurnsDuration > 0 ? kenBurnsDuration : 0.01,
               ease: "linear",
             }}
           >
@@ -190,34 +164,63 @@ export default function RandomImageAnimation() {
               src={slide.image}
               alt={imageAlts[slide.imageIndex] ?? "Travel destination showcase"}
               fill
-              sizes="(max-width: 768px) 100vw, 50vw"
+              sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 720px"
               className="object-cover"
+              quality={92}
               priority={slide.key === 0}
-              unoptimized
             />
           </motion.div>
         </motion.div>
       </AnimatePresence>
 
-      {/* Atmospheric overlays: depth without hiding the destination */}
       <div
-        className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-black/45 via-transparent to-transparent"
+        className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-black/50 via-black/5 to-transparent"
         aria-hidden
       />
       <div
-        className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-br from-primary/15 via-transparent to-primary/5"
+        className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-br from-primary/12 via-transparent to-primary/5"
         aria-hidden
       />
       <div
-        className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-transparent via-transparent to-black/15"
+        className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-transparent via-transparent to-black/12"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute -left-1/4 top-0 z-10 h-2/3 w-2/3 rounded-full bg-white/[0.06] blur-3xl"
         aria-hidden
       />
 
-      {/* Soft specular highlight (travel brochure feel) */}
+      {/* Progress dots */}
       <div
-        className="pointer-events-none absolute -left-1/4 top-0 z-10 h-2/3 w-2/3 rounded-full bg-white/5 blur-3xl"
-        aria-hidden
-      />
+        className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 gap-1.5"
+        role="tablist"
+        aria-label="Slideshow position"
+      >
+        {images.map((src, i) => (
+          <button
+            key={src}
+            type="button"
+            role="tab"
+            aria-selected={i === slide.imageIndex}
+            aria-label={`Slide ${i + 1}`}
+            onClick={() => {
+              if (i === slide.imageIndex) return;
+              setSlide((current) => ({
+                image: images[i],
+                imageIndex: i,
+                preset: getRandomItem(presets).item,
+                key: current.key + 1,
+              }));
+            }}
+            className={cn(
+              "h-1.5 rounded-full transition-all duration-300",
+              i === slide.imageIndex
+                ? "w-5 bg-white/90"
+                : "w-1.5 bg-white/40 hover:bg-white/60",
+            )}
+          />
+        ))}
+      </div>
     </div>
   );
 }

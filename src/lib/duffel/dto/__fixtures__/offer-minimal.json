@@ -8,6 +8,8 @@
     "passengers": [
       { "id": "pas_test_adult_1", "type": "adult" }
     ],
+    "passenger_identity_documents_required": false,
+    "supported_passenger_identity_document_types": [],
     "slices": [
       {
         "id": "sli_test_fixture_slice_1",

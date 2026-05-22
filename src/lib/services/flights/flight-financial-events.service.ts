@@ -39,7 +39,12 @@ export async function listBookingFinancialEvents(input: {
   }
 
   const rows = await bookingFinancialEventRepository.listForBooking(input.bookingId);
-  return rows.map((r) => ({
+  const visible = rows.filter(
+    (r) =>
+      r.type !== "change_quoted" ||
+      (Boolean(r.amount) && Boolean(r.currency)),
+  );
+  return visible.map((r) => ({
     id: r.id,
     type: r.type as BookingFinancialEventType,
     amount: r.amount ?? null,

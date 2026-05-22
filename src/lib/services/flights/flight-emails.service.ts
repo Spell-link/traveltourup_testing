@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getSiteUrl } from "@/config/site-url";
+import { formatMoneyDisplay } from "@/lib/currency/format-display";
 import { sendEmail } from "@/lib/email";
 import { EmailType } from "@/types/email";
 import { logger } from "@/lib/obs/logger";
@@ -77,12 +79,22 @@ export async function sendFlightCancellationEmail(input: {
   if (!to) return;
   const guestName = guestNameFrom(leadPassenger(input.booking));
 
-  const refundLine =
-    input.refundAmount && input.refundCurrency
-      ? input.refundTo === "airline_credits"
-        ? `Airline credits issued: ${input.refundAmount} ${input.refundCurrency}.`
-        : `A refund of ${input.refundAmount} ${input.refundCurrency} is being processed back to your original payment method.`
-      : "We will follow up with refund details shortly.";
+  const base = getSiteUrl().replace(/\/$/, "");
+  const manageUrl = `${base}/profile/bookings/${encodeURIComponent(input.booking.id)}`;
+  const airlineRef = input.booking.flightBooking?.booking_reference ?? null;
+
+  let refundAmountDisplay: string | undefined;
+  if (input.refundAmount && input.refundCurrency) {
+    const n = Number.parseFloat(input.refundAmount);
+    if (Number.isFinite(n)) {
+      refundAmountDisplay = formatMoneyDisplay(n, input.refundCurrency.toUpperCase(), "en-US");
+    } else {
+      refundAmountDisplay = `${input.refundCurrency.toUpperCase()} ${input.refundAmount}`.trim();
+    }
+  }
+
+  const securityNote =
+    "If you did not request this cancellation, contact us immediately at support@traveltourup.com with your booking reference.";
 
   try {
     await sendEmail({
@@ -91,7 +103,11 @@ export async function sendFlightCancellationEmail(input: {
       data: {
         bookingReference: input.booking.booking_ref_no,
         guestName,
-        summary: `${summaryFor(input.booking)} ${refundLine}`,
+        summary: securityNote,
+        manageUrl,
+        airlineRecordLocator: airlineRef ?? undefined,
+        refundAmountDisplay,
+        refundTo: input.refundTo ?? undefined,
       },
     });
   } catch (e) {
@@ -132,6 +148,60 @@ export async function sendFlightRefundEmail(input: {
     });
   } catch (e) {
     logger.warn("Flight refund email failed", {
+      booking_id: input.booking.id,
+      error_code: e instanceof Error ? e.message.slice(0, 120) : "EMAIL_FAILED",
+    });
+  }
+}
+
+/** Best-effort order change confirmation email. */
+export async function sendFlightOrderChangeEmailSafe(input: {
+  booking: FlightBookingLike;
+  changeAmount: string | null;
+  changeCurrency: string | null;
+  duffelOrderChangeId: string;
+}): Promise<void> {
+  const to = recipientEmailFrom(input.booking);
+  if (!to) return;
+  const guestName = guestNameFrom(leadPassenger(input.booking));
+  const base = getSiteUrl().replace(/\/$/, "");
+  const manageUrl = `${base}/profile/bookings/${encodeURIComponent(input.booking.id)}`;
+
+  let deltaDisplay: string | undefined;
+  if (input.changeAmount && input.changeCurrency) {
+    const n = Number.parseFloat(input.changeAmount);
+    if (Number.isFinite(n)) {
+      deltaDisplay = formatMoneyDisplay(Math.abs(n), input.changeCurrency.toUpperCase(), "en-US");
+    }
+  }
+
+  const summaryParts = [
+    `Your flight change (${input.duffelOrderChangeId}) is confirmed.`,
+    deltaDisplay
+      ? Number.parseFloat(input.changeAmount ?? "0") < 0
+        ? `A refund of ${deltaDisplay} will be returned to your original payment method where applicable.`
+        : Number.parseFloat(input.changeAmount ?? "0") > 0
+          ? `Additional charge: ${deltaDisplay}.`
+          : undefined
+      : undefined,
+    "View your updated itinerary in My bookings.",
+  ].filter(Boolean);
+
+  try {
+    await sendEmail({
+      type: EmailType.cancel,
+      to,
+      data: {
+        bookingReference: input.booking.booking_ref_no,
+        guestName,
+        summary: summaryParts.join(" "),
+        manageUrl,
+        airlineRecordLocator: input.booking.flightBooking?.booking_reference ?? undefined,
+      },
+      subject: `Flight change confirmed — ${input.booking.booking_ref_no}`,
+    });
+  } catch (e) {
+    logger.warn("Flight order change email failed", {
       booking_id: input.booking.id,
       error_code: e instanceof Error ? e.message.slice(0, 120) : "EMAIL_FAILED",
     });

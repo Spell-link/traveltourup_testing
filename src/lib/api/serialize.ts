@@ -103,6 +103,9 @@ export function serializeHotelBookingRow(row: HotelBooking) {
 }
 
 export function serializeFlightBookingRow(row: FlightBookingSerialized) {
+  const ticketReady = Boolean(row.ticket_pdf_storage_path);
+  const ticketGenerationFailed =
+    Boolean(row.ticket_pdf_generation_failed_at) && !row.ticket_pdf_storage_path;
   return {
     id: row.id,
     booking_id: row.booking_id,
@@ -119,6 +122,9 @@ export function serializeFlightBookingRow(row: FlightBookingSerialized) {
     payload: row.payload,
     ancillaries: (row.ancillaries ?? []).map(serializeBookingAncillaryRow),
     order_cancellations: (row.orderCancellations ?? []).map(serializeFlightOrderCancellationRow),
+    ticket_ready: ticketReady,
+    ticket_generated_at: row.ticket_pdf_generated_at?.toISOString() ?? null,
+    ticket_generation_failed: ticketGenerationFailed,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -138,6 +144,9 @@ export function serializeBookingWithRelations(row: BookingWithChildren) {
 export function serializeFlightBookingListRow(
   row: NonNullable<BookingWithListChildren["flightBooking"]>,
 ) {
+  const ticketReady = Boolean(row.ticket_pdf_storage_path);
+  const ticketGenerationFailed =
+    Boolean(row.ticket_pdf_generation_failed_at) && !row.ticket_pdf_storage_path;
   return {
     id: row.id,
     booking_id: row.booking_id,
@@ -150,6 +159,9 @@ export function serializeFlightBookingListRow(
     last_offer_total_currency: row.last_offer_total_currency,
     offer_expires_at: row.offer_expires_at?.toISOString() ?? null,
     itinerary_snapshot: row.itinerary_snapshot,
+    ticket_ready: ticketReady,
+    ticket_generated_at: row.ticket_pdf_generated_at?.toISOString() ?? null,
+    ticket_generation_failed: ticketGenerationFailed,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

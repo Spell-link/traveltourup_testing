@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { sendEmail } from "@/lib/email";
+import { verifySmtpConnection } from "@/lib/email/transporter";
 import { EmailBookingSubType, EmailType } from "@/types/email";
 import { parseEmailSendRequest } from "@/lib/validations/email.schema";
 import { sampleDataForEmail } from "./sample-email-data";
@@ -9,6 +10,13 @@ import { sampleDataForEmail } from "./sample-email-data";
 type TriggerResult =
   | { ok: true; messageId: string }
   | { ok: false; error: string };
+
+type VerifyResult = { ok: true } | { ok: false; error: string };
+
+/** Verifies Hostinger Titan SMTP credentials and connectivity. */
+export async function verifySmtp(): Promise<VerifyResult> {
+  return verifySmtpConnection();
+}
 
 function buildRequestBody(input: {
   emailType: EmailType;

@@ -80,6 +80,12 @@ h6 {
   --color-destructive: #dc2626;
   --color-destructive-foreground: #ffffff;
   --color-hero-overlay: #0f4c5c;
+  /* Admin dashboard charts (Recharts / shadcn chart) */
+  --chart-1: #0e90c7;
+  --chart-2: #059669;
+  --chart-3: #f59e0b;
+  --chart-4: #8b5cf6;
+  --chart-5: #ef4444;
 }
 
 /* ═══════════════════════════════════════════════════════════════════

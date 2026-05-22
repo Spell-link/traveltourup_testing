@@ -13,7 +13,7 @@ export type SendContactMessageInput = {
 
 /**
  * Sends the contact form to the admin inbox.
- * Uses `ADMIN_EMAIL` when set; otherwise `EMAIL_FROM` (same verified address as Resend From) so local/dev works with one env.
+ * Uses `ADMIN_EMAIL` when set; otherwise `EMAIL_FROM` so local/dev works with one env.
  * Caller must pass Zod-validated input.
  */
 export async function sendContactMessage(input: SendContactMessageInput): Promise<void> {

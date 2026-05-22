@@ -4,6 +4,7 @@ import React from "react";
 import { Link, usePathname } from "@/i18n/navigation";
 import { useBookingBreadcrumbHotelTitle } from "@/components/shared/BookingBreadcrumbHotelContext";
 import { useBookingBreadcrumbFlightLabels } from "@/components/shared/BookingBreadcrumbFlightContext";
+import { useBookingBreadcrumbProfileBookingTitle } from "@/components/shared/BookingBreadcrumbProfileBookingContext";
 import { useLocale, useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
@@ -85,6 +86,20 @@ function isFlightDetailPage(segments: string[]): boolean {
   );
 }
 
+/** Internal booking id on `/profile/bookings/:id` — hide raw cuid from crumbs. */
+function isProfileBookingIdSegment(segment: string): boolean {
+  return /^[a-z0-9]{12,}$/i.test(segment);
+}
+
+function isProfileBookingDetailPage(segments: string[]): boolean {
+  return (
+    segments[0] === "profile" &&
+    segments[1] === "bookings" &&
+    segments.length === 3 &&
+    isProfileBookingIdSegment(segments[2] ?? "")
+  );
+}
+
 function shouldUseParentSectionIcon(segments: string[], currentSegment: string) {
   if (segments.length !== 2) return false;
   const section = segments[0];
@@ -104,10 +119,21 @@ function getLabel(
   index: number,
   hotelsDetailTitle: string | null,
   flightDetailRouteLabel: string | null,
+  profileBookingCrumbLabel: string | null,
   t: TBreadcrumb,
 ) {
   const titleKey = `pages.${segment}.title`;
   if (t.has(titleKey)) return t(titleKey);
+
+  if (
+    segments[0] === "profile" &&
+    segments[1] === "bookings" &&
+    segments.length === 3 &&
+    index === 2 &&
+    isProfileBookingIdSegment(segment)
+  ) {
+    return profileBookingCrumbLabel ?? t("detailBooking");
+  }
 
   if (
     segments[0] === "hotels" &&
@@ -139,6 +165,7 @@ export default function Breadcrumb() {
   const pathname = usePathname();
   const { hotelDetailCrumbLabel } = useBookingBreadcrumbHotelTitle();
   const { flightDetailRouteLabel, flightDetailPageTitle } = useBookingBreadcrumbFlightLabels();
+  const { profileBookingCrumbLabel } = useBookingBreadcrumbProfileBookingTitle();
   const t = useTranslations("Breadcrumb");
 
   if (pathname === "/") return null;
@@ -146,6 +173,7 @@ export default function Breadcrumb() {
   const segments = pathname.split("/").filter(Boolean);
   const currentSegment = segments[segments.length - 1];
   const onFlightDetail = isFlightDetailPage(segments);
+  const onProfileBookingDetail = isProfileBookingDetailPage(segments);
 
   const currentTitleKey = `pages.${currentSegment}.title`;
   const resolvedPageTitle = t.has(currentTitleKey) ? t(currentTitleKey) : null;
@@ -154,14 +182,17 @@ export default function Breadcrumb() {
     resolvedPageTitle ??
     (onFlightDetail
       ? flightDetailPageTitle ?? t("detailFlight")
-      : getLabel(
-          currentSegment,
-          segments,
-          segments.length - 1,
-          hotelDetailCrumbLabel,
-          flightDetailRouteLabel,
-          t,
-        ));
+      : onProfileBookingDetail
+        ? profileBookingCrumbLabel ?? t("detailBooking")
+        : getLabel(
+            currentSegment,
+            segments,
+            segments.length - 1,
+            hotelDetailCrumbLabel,
+            flightDetailRouteLabel,
+            profileBookingCrumbLabel,
+            t,
+          ));
 
   const descKey = `pages.${currentSegment}.description`;
   const description = t.has(descKey) ? t(descKey) : "";
@@ -178,7 +209,7 @@ export default function Breadcrumb() {
   const CrumbSep = rtl ? ChevronLeft : ChevronRight;
 
   const crumbs = segments.map((seg, i) => ({
-    label: getLabel(seg, segments, i, hotelDetailCrumbLabel, flightDetailRouteLabel, t),
+    label: getLabel(seg, segments, i, hotelDetailCrumbLabel, flightDetailRouteLabel, profileBookingCrumbLabel, t),
     href: "/" + segments.slice(0, i + 1).join("/"),
     isLast: i === segments.length - 1,
   }));

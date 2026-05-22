@@ -81,7 +81,7 @@ const en = {
     cars: "Cars",
     hotels: "Hotels",
     contact: "Contact",
-    phoneDisplay: "+92 (321)-9400142",
+    phoneDisplay: "+1 800 443 0456",
     emailDisplay: "info@traveltourup.com",
     theme: "Theme",
     currency: "Currency",

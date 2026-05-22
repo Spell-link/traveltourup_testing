@@ -27,7 +27,7 @@ function firstNameFromMetadata(meta: Record<string, unknown> | undefined): strin
 }
 
 /**
- * Supabase Auth → Send Email Hook. Verifies Standard Webhooks signature, then sends via Resend.
+ * Supabase Auth → Send Email Hook. Verifies Standard Webhooks signature, then sends via SMTP.
  * Configure in Supabase Dashboard → Authentication → Hooks → Send Email → URL of this route.
  */
 export async function handleSupabaseEmailHook(req: NextRequest): Promise<Response> {

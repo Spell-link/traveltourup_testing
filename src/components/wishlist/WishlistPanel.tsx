@@ -71,7 +71,7 @@ export function WishlistPanel() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <NativeSelect
           id="wishlist-type-filter"
           label="Type"
@@ -86,7 +86,7 @@ export function WishlistPanel() {
             </option>
           ))}
         </NativeSelect>
-        <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+        <Button type="button" variant="outline" size="md" onClick={() => void load()} disabled={loading}>
           Refresh
         </Button>
       </div>

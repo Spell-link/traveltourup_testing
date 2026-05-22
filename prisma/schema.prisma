@@ -217,6 +217,11 @@ model FlightBooking {
   offer_expires_at            DateTime? @map("offer_expires_at")
   itinerary_snapshot          Json?     @map("itinerary_snapshot")
   order_raw                   Json?     @map("order_raw")
+  /// Supabase Storage object key (private `flight-tickets` bucket) for generated itinerary PDF.
+  ticket_pdf_storage_path      String?   @map("ticket_pdf_storage_path") @db.VarChar(512)
+  ticket_pdf_generated_at      DateTime? @map("ticket_pdf_generated_at")
+  ticket_pdf_generation_failed_at DateTime? @map("ticket_pdf_generation_failed_at")
+  ticket_pdf_error             String?   @map("ticket_pdf_error") @db.VarChar(500)
 
   created_at DateTime @default(now()) @map("created_at")
   updated_at DateTime @updatedAt @map("updated_at")
@@ -246,7 +251,7 @@ model FlightOrderChange {
   /// Quoted price delta (positive when customer pays more, negative when refunded).
   change_amount                   String?  @map("change_amount") @db.VarChar(24)
   change_currency                 String?  @map("change_currency") @db.VarChar(3)
-  /// `pending` | `quoted` | `confirmed` | `expired` | `cancelled` | `failed`.
+  /// `pending` | `quoted` | `pending_payment` | `confirmed` | `expired` | `cancelled` | `failed`.
   status                          String   @map("status") @db.VarChar(24)
   /// Optional link to the PaymentIntent used to pay the positive delta.
   flight_payment_intent_record_id String?  @map("flight_payment_intent_record_id")
@@ -312,6 +317,7 @@ model FlightPaymentRefundAttempt {
   flightPaymentIntentRecord FlightPaymentIntentRecord? @relation(fields: [flight_payment_intent_record_id], references: [id], onDelete: SetNull)
 
   @@index([booking_id])
+  @@index([status, updated_at])
   @@map("flight_payment_refund_attempts")
 }
 
@@ -362,6 +368,18 @@ model FlightPaymentIntentRecord {
   offer_amount     String  @map("offer_amount") @db.VarChar(24)
   offer_currency   String  @map("offer_currency") @db.VarChar(3)
   markup_amount    String  @map("markup_amount") @db.VarChar(24)
+  /// Customer subtotal before Duffel Payments fee gross-up (immutable at PIT create).
+  subtotal_charged_amount      String? @map("subtotal_charged_amount") @db.VarChar(24)
+  /// `charge_amount − subtotal_charged_amount` at PIT create.
+  duffel_payments_fee_amount   String? @map("duffel_payments_fee_amount") @db.VarChar(24)
+  duffel_payments_fee_rate     String? @map("duffel_payments_fee_rate") @db.VarChar(16)
+  fx_rate_applied              String? @map("fx_rate_applied") @db.VarChar(16)
+  commission_percent_applied   String? @map("commission_percent_applied") @db.VarChar(16)
+  markup_fixed_applied         String? @map("markup_fixed_applied") @db.VarChar(24)
+  applied_pricing_rule_id      String? @map("applied_pricing_rule_id") @db.VarChar(64)
+  /// Duffel-reported fee after capture (reconciliation).
+  duffel_reported_fees_amount  String? @map("duffel_reported_fees_amount") @db.VarChar(24)
+  duffel_reported_net_amount   String? @map("duffel_reported_net_amount") @db.VarChar(24)
   /// Sum of selected ancillary service amounts in `offer_currency` (Duffel major units).
   services_subtotal_amount String? @map("services_subtotal_amount") @db.VarChar(24)
   /// Snapshot of `{ id, quantity }[]` sent to Duffel `POST /air/orders` `services`.
@@ -387,6 +405,7 @@ model FlightPaymentIntentRecord {
 
   @@index([booking_id])
   @@index([status, updated_at])
+  @@index([order_failure_refund_id])
   @@map("flight_payment_intent_records")
 }
 

@@ -2,7 +2,7 @@
 
 import { DetailPageLayout } from "@/components/shared/DetailPageLayout";
 import { BookingSidebarSkeleton } from "@/components/shared/BookingSidebar";
-import { ReviewsSectionSkeleton } from "@/components/flights/FlightDetailSkeleton";
+import { ReviewsSectionSkeleton } from "@/components/flights/FlightSkeletons";
 import { HotelDetailContentSkeleton } from "@/components/hotels/HotelDetailContentSkeleton";
 
 /** Full stays hotel detail layout while rates load (matches StaysHotelDetail + HotelDetailContent). */

@@ -1,4 +1,3 @@
-// @ts-nocheck - Legacy component; types tightened incrementally
 "use client";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -15,6 +14,7 @@ import {
   describeSearchRoute,
   tripTypeFromUrl,
 } from "@/lib/flights/search-from-url";
+import { persistFlightSearchPath } from "@/lib/flights/flight-search-url-session";
 import { buildFlightEditSearchSummary } from "@/lib/flights/flight-edit-search-summary";
 import {
   flightOfferToListDisplay,
@@ -32,17 +32,26 @@ import { isRtlLocale } from "@/lib/i18n/rtl";
 import { rtlDirProp, rtlTypographyClass } from "@/lib/i18n/rtl-typography";
 import { useComparison, GenericComparison } from "../shared/GenericComparison";
 import { createFlightComparisonConfig } from "../shared/ComparisonConfigs";
-import { FlightListSearchSkeleton } from "@/components/flights/FlightListSkeleton";
+import { FlightListSearchSkeleton } from "@/components/flights/FlightSkeletons";
 import {
   FlightResultsFilterSidebar,
   FLIGHT_SORT_IDS,
+  type FlightSortId,
+  type StopsFilterMode,
 } from "@/components/flights/results/FlightResultsFilterSidebar";
-import { FlightResultCard } from "@/components/flights/results/FlightResultCard";
+import { FlightResultCard, type FlightResultComparisonApi } from "@/components/flights/results/FlightResultCard";
 import {
   FLIGHT_RESULTS_PAGE_SIZE,
   getFlightResultsPaginationRange,
 } from "@/components/flights/results/flight-results-pagination";
 import FlightsTab from "@/components/flights/FlightsTab";
+import { FlightChangeModeBanner } from "@/components/flights/change/FlightChangeModeBanner";
+import { OriginalBookingCard } from "@/components/flights/change/OriginalBookingCard";
+import { useFlightChangeResults } from "@/components/flights/useFlightChangeResults";
+import type { FlightFlowContext } from "@/lib/flights/flight-flow-context";
+import { isChangeFlightFlow, NEW_BOOKING_FLOW } from "@/lib/flights/flight-flow-context";
+import type { OriginalBookingContext } from "@/lib/flights/flow-variant";
+import type { FlightChangeListDisplay } from "@/lib/flights/order-change-list-display";
 import {
   Dialog,
   DialogClose,
@@ -68,6 +77,12 @@ function isoToMinutes(iso: string | null | undefined): number | null {
 
 const SORT_IDS = [...FLIGHT_SORT_IDS];
 
+type FlightListProps = {
+  flowContext?: FlightFlowContext;
+};
+
+const PLACEHOLDER_CHANGE_BOOKING = {} as OriginalBookingContext;
+
 function stopsAllowed(stops: number, mode: string): boolean {
   if (mode === "any") return true;
   if (mode === "direct") return stops === 0;
@@ -76,7 +91,38 @@ function stopsAllowed(stops: number, mode: string): boolean {
   return true;
 }
 
-const FlightList = () => {
+const EMPTY_COMPARISON: FlightResultComparisonApi = {
+  isSelected: () => false,
+  toggleItem: () => {},
+};
+
+function hasCachedFlightOffers(queryString: string): boolean {
+  const body = flightSearchBodyFromUrl(new URLSearchParams(queryString));
+  if (!body) return false;
+  try {
+    const stableKey = stableFlightSearchBodyKey(body);
+    const sidKey = flightSessionIdStorageKey(stableKey);
+    const offersKey = `offers:${sidKey}`;
+    const rawOffers = sessionStorage.getItem(offersKey);
+    if (!rawOffers) return false;
+    const parsed = JSON.parse(rawOffers) as unknown;
+    if (!Array.isArray(parsed)) return false;
+    return Boolean(sessionStorage.getItem(sidKey)?.trim());
+  } catch {
+    return false;
+  }
+}
+
+function initialSearchLoading(queryString: string, isChange: boolean): boolean {
+  if (isChange) return false;
+  const body = flightSearchBodyFromUrl(new URLSearchParams(queryString));
+  if (!body) return false;
+  return !hasCachedFlightOffers(queryString);
+}
+
+const FlightList = ({ flowContext = NEW_BOOKING_FLOW }: FlightListProps) => {
+  const isChange = isChangeFlightFlow(flowContext);
+  const changeCtx = isChange ? flowContext : null;
   const locale = useLocale();
   const rtl = isRtlLocale(locale);
   const router = useRouter();
@@ -85,8 +131,15 @@ const FlightList = () => {
   const queryString = searchParams.toString();
   const tResults = useTranslations("Flights.results");
   const tFilters = useTranslations("Flights.filters");
+  const tChange = useTranslations("Flights.change");
   const ft = useTranslations("Flights.tab");
   const [editSearchOpen, setEditSearchOpen] = useState(false);
+
+  const changeResults = useFlightChangeResults(
+    changeCtx?.bookingId ?? "",
+    changeCtx?.originalBooking ?? PLACEHOLDER_CHANGE_BOOKING,
+    { enabled: isChange },
+  );
 
   /** Semantic search identity — unchanged when only `[locale]` changes → no refetch on language switch. */
   const stableSearchKey = useMemo(() => {
@@ -94,25 +147,32 @@ const FlightList = () => {
     return body ? stableFlightSearchBodyKey(body) : "";
   }, [queryString]);
 
+  useEffect(() => {
+    if (isChange || !queryString) return;
+    persistFlightSearchPath(`/flights?${queryString}`);
+  }, [queryString, isChange]);
+
   const hasFetchedRef = useRef(false);
 
   const [flights, setFlights] = useState<FlightListDisplay[]>([]);
   const [offerDtos, setOfferDtos] = useState<FlightOfferDTO[]>([]);
   const [searchSessionId, setSearchSessionId] = useState<string | null>(null);
-  const [filteredFlights, setFilteredFlights] = useState<FlightListDisplay[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [sortBy, setSortBy] = useState(() => searchParams.get("sort") ?? "best");
+  const [loading, setLoading] = useState(() => initialSearchLoading(queryString, isChange));
+  const [sortBy, setSortBy] = useState<FlightSortId>(() => {
+    const s = searchParams.get("sort");
+    return s && SORT_IDS.includes(s as FlightSortId) ? (s as FlightSortId) : "best";
+  });
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [isSmUp, setIsSmUp] = useState<boolean | undefined>(undefined);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const resultsAnchorRef = useRef<HTMLElement | null>(null);
+  const resultsAnchorRef = useRef<HTMLDivElement | null>(null);
   const skipScrollOnMountRef = useRef(true);
 
   const [priceMax, setPriceMax] = useState(5000);
   const [priceSliderCap, setPriceSliderCap] = useState(5000);
-  const [stopsMode, setStopsMode] = useState("any");
+  const [stopsMode, setStopsMode] = useState<StopsFilterMode>("any");
   const [selectedAirline, setSelectedAirline] = useState("");
   const [flightNumberQuery, setFlightNumberQuery] = useState("");
   const [depTimeFrom, setDepTimeFrom] = useState("");
@@ -150,7 +210,9 @@ const FlightList = () => {
 
   const sortFromUrl = searchParams.get("sort");
   useEffect(() => {
-    if (sortFromUrl && SORT_IDS.includes(sortFromUrl)) setSortBy(sortFromUrl);
+    if (sortFromUrl && SORT_IDS.includes(sortFromUrl as FlightSortId)) {
+      setSortBy(sortFromUrl as FlightSortId);
+    }
   }, [sortFromUrl]);
 
   useEffect(() => {
@@ -201,21 +263,29 @@ const FlightList = () => {
     [queryString, pathname, router],
   );
 
-  const handleSortChange = (id: string) => {
+  const handleSortChange = (id: FlightSortId) => {
     setSortBy(id);
     pushSortToUrl(id);
   };
 
   const comparison = useComparison(3);
+  const resultComparison: FlightResultComparisonApi = isChange
+    ? EMPTY_COMPARISON
+    : {
+        isSelected: (id: string) =>
+          (comparison.isSelected as unknown as (itemId: string) => boolean)(id),
+        toggleItem: (flight: FlightListDisplay) =>
+          (comparison.toggleItem as unknown as (item: FlightListDisplay) => void)(flight),
+      };
   const flightComparisonConfig = createFlightComparisonConfig();
 
   useEffect(() => {
+    if (isChange) return;
     let cancelled = false;
     const body = flightSearchBodyFromUrl(new URLSearchParams(queryString));
     if (!body) {
       setFlights([]);
       setOfferDtos([]);
-      setFilteredFlights([]);
       setSearchSessionId(null);
       setFetchError(null);
       setLoading(false);
@@ -236,13 +306,20 @@ const FlightList = () => {
         sessionStorage.setItem("flightSearchSessionId", sessionId);
         sessionStorage.setItem(sidStorageKey, sessionId);
         sessionStorage.setItem(offersStorageKey, JSON.stringify(offers));
-      } catch {
-        /* ignore */
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "QuotaExceededError") {
+          try {
+            sessionStorage.setItem("flightSearchSessionId", sessionId);
+            sessionStorage.setItem(sidStorageKey, sessionId);
+            sessionStorage.removeItem(offersStorageKey);
+          } catch {
+            /* ignore */
+          }
+        }
       }
       const rows = offers.map(flightOfferToListDisplay);
       setOfferDtos(offers);
       setFlights(rows);
-      setFilteredFlights(rows);
       const maxP = Math.max(500, ...rows.map((r) => r.price), 1000);
       const cap = Math.ceil(maxP / 500) * 500 + 500;
       setPriceSliderCap(cap);
@@ -277,7 +354,6 @@ const FlightList = () => {
     setFetchError(null);
     setFlights([]);
     setOfferDtos([]);
-    setFilteredFlights([]);
     setRtStep("outbound");
     setSelectedOutboundKey(null);
 
@@ -324,7 +400,19 @@ const FlightList = () => {
       cancelled = true;
       hasFetchedRef.current = false;
     };
-  }, [stableSearchKey, queryString]);
+  }, [stableSearchKey, queryString, isChange]);
+
+  const listFlights: FlightListDisplay[] = isChange ? changeResults.flights : flights;
+  const listLoading = isChange ? changeResults.loading : loading;
+  const listFetchError = isChange ? changeResults.fetchError : fetchError;
+
+  useEffect(() => {
+    if (!isChange || changeResults.flights.length === 0) return;
+    const maxP = Math.max(500, ...changeResults.flights.map((r) => r.price), 1000);
+    const cap = Math.ceil(maxP / 500) * 500 + 500;
+    setPriceSliderCap(cap);
+    setPriceMax(cap);
+  }, [isChange, changeResults.flights]);
 
   const rtClusters = useMemo(() => {
     if (!isRoundTrip || offerDtos.length === 0) return [];
@@ -351,21 +439,23 @@ const FlightList = () => {
       return inboundRows;
     }
     return flights;
-  }, [isRoundTrip, rtStep, rtClusters, inboundRows, flights]);
+  }, [isRoundTrip, rtStep, rtClusters, inboundRows, flights, isChange, listFlights]);
+
+  const rowsForFilters = isChange ? listFlights : baseRowsForFilters;
 
   const airlineOptions = useMemo(() => {
     const m = new Map<string, string>();
-    for (const f of flights) {
+    for (const f of rowsForFilters) {
       const code = f.airlineCode?.trim();
       if (!code || code === "—") continue;
       const name = f.airlineName ?? f.airline;
       if (!m.has(code)) m.set(code, name);
     }
     return [...m.entries()].map(([code, name]) => ({ code, name }));
-  }, [flights]);
+  }, [rowsForFilters]);
 
-  useEffect(() => {
-    let result = [...baseRowsForFilters];
+  const filteredFlights = useMemo(() => {
+    let result = [...rowsForFilters];
 
     result = result.filter((f) => f.price >= 0 && f.price <= priceMax);
 
@@ -413,9 +503,9 @@ const FlightList = () => {
         result.sort((a, b) => b.rating - a.rating);
     }
 
-    setFilteredFlights(result);
+    return result;
   }, [
-    baseRowsForFilters,
+    rowsForFilters,
     priceMax,
     selectedAirline,
     stopsMode,
@@ -491,9 +581,9 @@ const FlightList = () => {
       skipScrollOnMountRef.current = false;
       return;
     }
-    if (loading) return;
+    if (listLoading) return;
     resultsAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [displayPage, loading]);
+  }, [displayPage, listLoading]);
 
   const clearAllFilters = () => {
     setPriceMax(priceSliderCap);
@@ -507,16 +597,20 @@ const FlightList = () => {
   };
 
   const detailHref = (offerId: string) => {
+    if (isChange) return changeResults.detailHref(offerId);
     const q = searchSessionId
       ? `?search_session=${encodeURIComponent(searchSessionId)}`
       : "";
     return `/flights/${offerId}${q}`;
   };
 
+  const changeRow = (flight: FlightListDisplay): FlightChangeListDisplay | undefined =>
+    isChange ? (flight as FlightChangeListDisplay) : undefined;
+
   const sidebar = (
     <FlightResultsFilterSidebar
       sortBy={sortBy}
-      onSortChange={handleSortChange}
+      onSortChange={(id) => handleSortChange(id as FlightSortId)}
       priceMax={priceMax}
       priceSliderMax={priceSliderCap}
       onPriceMaxChange={setPriceMax}
@@ -536,8 +630,12 @@ const FlightList = () => {
       onArrTimeFrom={setArrTimeFrom}
       onArrTimeTo={setArrTimeTo}
       onClearAll={clearAllFilters}
-      editSearchSummary={flightEditSearchSummary}
+      editSearchSummary={isChange ? changeResults.editSearchSummary : flightEditSearchSummary}
       onEditSearch={() => setEditSearchOpen(true)}
+      onFlightSearchStart={() => {
+        setEditSearchOpen(false);
+        setShowMobileFilters(false);
+      }}
     />
   );
 
@@ -550,7 +648,7 @@ const FlightList = () => {
   return (
     <div className="min-h-screen bg-muted">
       <GenericComparison
-        items={flights}
+        items={flights as unknown as Parameters<typeof GenericComparison>[0]["items"]}
         selectedItems={comparison.selectedItems}
         config={flightComparisonConfig}
         isModalOpen={comparison.showModal}
@@ -568,6 +666,8 @@ const FlightList = () => {
           <div className=" pr-1">
             <FlightsTab
               variant="modal"
+              flowVariant={isChange ? "change-flight" : "new-booking"}
+              originalBooking={changeCtx?.originalBooking}
               onFlightSearchStart={() => {
                 setEditSearchOpen(false);
                 setShowMobileFilters(false);
@@ -580,16 +680,30 @@ const FlightList = () => {
       <div className="bg-muted shadow-sm">
         <div className="max-w-7xl mx-auto px-4 md:px-4 py-3">
           <div className="flex flex-col gap-2">
+            {isChange && changeCtx ? (
+              <FlightChangeModeBanner
+                bookingRefNo={changeCtx.originalBooking.bookingRefNo}
+                bookingId={changeCtx.bookingId}
+              />
+            ) : null}
             <div>
-              <h1 className="text-2xl font-bold">{describeSearchRoute(searchParams).title}</h1>
-              <p className="text-muted-foreground">{describeSearchRoute(searchParams).subtitle}</p>
-              {fetchError ? (
+              <h1 className="text-2xl font-bold">
+                {isChange ? changeResults.routeTitle : describeSearchRoute(searchParams).title}
+              </h1>
+              <p className="text-muted-foreground">
+                {isChange
+                  ? changeResults.params
+                    ? `${changeResults.params.departure_date} · ${tChange("compareHint")}`
+                    : null
+                  : describeSearchRoute(searchParams).subtitle}
+              </p>
+              {listFetchError ? (
                 <p className="text-destructive text-sm mt-2" role="alert">
-                  {fetchError}
+                  {listFetchError}
                 </p>
               ) : null}
             </div>
-            {isRoundTrip && rtClusters.length > 0 ? (
+            {isRoundTrip && !isChange && rtClusters.length > 0 ? (
               <nav className="flex flex-wrap items-center gap-2 text-sm" aria-label={tResults("roundTripSteps")}>
                 <button
                   type="button"
@@ -636,10 +750,10 @@ const FlightList = () => {
       <div className="container mx-auto px-4 py-4 sm:py-8">
         <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between py-2">
           <div className="text-muted-foreground text-sm sm:text-base">
-            {loading ? (
+            {listLoading ? (
               <span>{tResults("loadingResults")}</span>
             ) : filteredFlights.length === 0 ? (
-              <span>{queryString ? tResults("noMatching") : "—"}</span>
+              <span>{queryString ? (isChange ? tChange("noOffers") : tResults("noMatching")) : "—"}</span>
             ) : (
               <span>
                 {tResults("showingRange", {
@@ -690,54 +804,53 @@ const FlightList = () => {
           </div>
           {showMobileFilters ? (
             <div
-              className="fixed inset-0 z-50 lg:hidden"
+              className="dark fixed inset-0 z-50 flex h-dvh max-h-dvh flex-col bg-card text-card-foreground lg:hidden"
               role="dialog"
               aria-modal="true"
               aria-label={tFilters("title")}
             >
-              <button
-                type="button"
-                className="absolute inset-0 bg-black/50"
-                onClick={() => setShowMobileFilters(false)}
-                aria-label={tResults("editSearchCancel")}
-              />
-              <div
-                className={cn(
-                  // Scoped dark surface matches hotel mobile filters / dark theme card (deep navy)
-                  "dark absolute inset-y-0 z-10 flex h-dvh max-h-dvh  flex-col border-border bg-card text-card-foreground shadow-xl",
-                  rtl ? "right-0 border-l" : "left-0 border-r",
-                )}
-              >
-                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
-                  <h2 className="text-xl font-bold text-foreground">{tFilters("title")}</h2>
-                  <button
-                    type="button"
-                    onClick={() => setShowMobileFilters(false)}
-                    className="rounded-lg p-1 text-foreground hover:bg-muted"
-                    aria-label={tResults("editSearchCancel")}
-                  >
-                    <X className="h-6 w-6" aria-hidden />
-                  </button>
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 dropdown-scrollbar">
-                  {sidebar}
-                </div>
-                <div className="shrink-0 border-t border-border bg-card p-4 sm:p-5">
-                  <button
-                    type="button"
-                    onClick={() => setShowMobileFilters(false)}
-                    className="w-full rounded-lg bg-primary py-3 font-semibold text-primary-foreground"
-                  >
-                    {tResults("done")}
-                  </button>
-                </div>
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
+                <h2 className="text-xl font-bold text-foreground">{tFilters("title")}</h2>
+                <button
+                  type="button"
+                  onClick={() => setShowMobileFilters(false)}
+                  className="rounded-lg p-1 text-foreground hover:bg-muted"
+                  aria-label={tResults("editSearchCancel")}
+                >
+                  <X className="h-6 w-6" aria-hidden />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 dropdown-scrollbar">
+                {sidebar}
+              </div>
+              <div className="shrink-0 border-t border-border bg-card p-4 sm:p-5">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileFilters(false)}
+                  className="w-full rounded-lg bg-primary py-3 font-semibold text-primary-foreground"
+                >
+                  {tResults("done")}
+                </button>
               </div>
             </div>
           ) : null}
 
           <div ref={resultsAnchorRef} id="flight-results" className="lg:w-3/4 scroll-mt-24">
-            {loading ? (
-              <FlightListSearchSkeleton rows={showGrid ? 6 : 5} />
+            {isChange && changeCtx ? (
+              <div className="mb-6">
+                <OriginalBookingCard
+                  flight={changeCtx.originalBooking.flight}
+                  bookingRefNo={changeCtx.originalBooking.bookingRefNo}
+                  totalAmount={changeCtx.originalBooking.totalAmount}
+                  currency={changeCtx.originalBooking.currency}
+                />
+              </div>
+            ) : null}
+            {listLoading ? (
+              <FlightListSearchSkeleton
+                rows={showGrid ? 6 : 5}
+                variant={showGrid ? "grid" : "list"}
+              />
             ) : !queryString ? (
               <div className="bg-card rounded-xl shadow-lg p-8 text-center text-muted-foreground">
                 <p className="text-lg font-medium text-foreground mb-2">{tResults("startSearchTitle")}</p>
@@ -768,17 +881,20 @@ const FlightList = () => {
                           key={flight.id}
                           flight={flight}
                           variant="grid"
-                          comparison={comparison}
-                          priceSubtitle={priceSubtitle}
+                          comparison={resultComparison}
+                          priceSubtitle={isChange ? tChange("changeFeeLabel") : priceSubtitle}
                           selectHref={isCluster ? undefined : detailHref(flight.id)}
-                          hideComparison={Boolean(isCluster)}
+                          hideComparison={Boolean(isCluster) || isChange}
+                          changeDelta={changeRow(flight)?.changeDelta}
                           onSelect={
                             isCluster
                               ? () => {
                                   setSelectedOutboundKey(flight.id.slice("cluster:".length));
                                   setRtStep("inbound");
                                 }
-                              : undefined
+                              : isChange
+                                ? () => changeResults.onSelectOffer(flight.id)
+                                : undefined
                           }
                         />
                       );
@@ -793,17 +909,20 @@ const FlightList = () => {
                         key={flight.id}
                         flight={flight}
                         variant="list"
-                        comparison={comparison}
-                        priceSubtitle={priceSubtitle}
+                        comparison={resultComparison}
+                        priceSubtitle={isChange ? tChange("changeFeeLabel") : priceSubtitle}
                         selectHref={isCluster ? undefined : detailHref(flight.id)}
-                        hideComparison={Boolean(isCluster)}
+                        hideComparison={Boolean(isCluster) || isChange}
+                        changeDelta={changeRow(flight)?.changeDelta}
                         onSelect={
                           isCluster
                             ? () => {
                                 setSelectedOutboundKey(flight.id.slice("cluster:".length));
                                 setRtStep("inbound");
                               }
-                            : undefined
+                            : isChange
+                              ? () => changeResults.onSelectOffer(flight.id)
+                              : undefined
                         }
                       />
                     );

@@ -38,12 +38,29 @@ export const flightPaymentIntentRepository = {
     offer_currency: string;
     markup_amount: string;
     services_subtotal_amount: string;
+    subtotal_charged_amount?: string | null;
+    duffel_payments_fee_amount?: string | null;
+    duffel_payments_fee_rate?: string | null;
+    fx_rate_applied?: string | null;
+    commission_percent_applied?: string | null;
+    markup_fixed_applied?: string | null;
+    applied_pricing_rule_id?: string | null;
     ancillary_selection?: Prisma.InputJsonValue;
     status: string;
     client_token: string;
     idempotency_key: string | null;
   }) {
     return prisma.flightPaymentIntentRecord.create({ data: input });
+  },
+
+  async updateDuffelReportedAmounts(
+    duffelIntentId: string,
+    input: { duffel_reported_fees_amount?: string | null; duffel_reported_net_amount?: string | null },
+  ) {
+    return prisma.flightPaymentIntentRecord.update({
+      where: { duffel_intent_id: duffelIntentId },
+      data: input,
+    });
   },
 
   async updateStatusByDuffelId(duffelIntentId: string, status: string) {

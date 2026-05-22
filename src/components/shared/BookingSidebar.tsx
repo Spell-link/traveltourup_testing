@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useId, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Plane, Building2, Car, Users, Calendar, Luggage, ChevronDown, ChevronUp } from "lucide-react";
@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/admin_ui/ui/sheet"
 import type { HotelRoom } from "@/data/mock-hotels";
 import type { FlightOfferDTO } from "@/lib/duffel/dto/flight-offer.dto";
 import type { SeatMapDTO } from "@/lib/duffel/dto/seat-map.dto";
-import { getFlightSeatMaps } from "@/lib/http/flights.client";
+import { getFlightSeatMapsDeduped } from "@/lib/http/flights.client";
 import { FlightCheckoutDuffelExtras } from "@/components/flights/FlightCheckoutDuffelExtras";
 import { estimateAncillariesAddOn } from "@/lib/flights/estimate-ancillaries";
 import {
@@ -18,6 +18,22 @@ import {
 } from "@/lib/flights/flight-detail-session";
 import { useLocale, useTranslations } from "next-intl";
 import { useCurrency } from "@/components/providers/CurrencyProvider";
+import {
+  defaultFlowContext,
+  isChangeFlightFlow,
+  type FlightFlowContext,
+} from "@/lib/flights/flight-flow-context";
+import type { FlightOrderChangeOffer } from "@/lib/http/flights.client";
+import {
+  parseChangeDelta,
+  patchFlightChangeSession,
+} from "@/lib/flights/flight-change-session";
+import {
+  resolveCarBookingSidebarMeta,
+  resolveFlightBookingSidebarMeta,
+  resolveHotelBookingSidebarMeta,
+} from "@/lib/bookings/booking-sidebar-context";
+import { writeFlightOfferSnapshot } from "@/lib/flights/flight-offer-snapshot";
 
 const BOOKING_STORAGE_KEY = "booking-details";
 
@@ -83,10 +99,26 @@ export interface BookingSidebarProps {
   requiresStaysQuote?: boolean;
   /** When set on flight detail, sidebar shows real Duffel bags/seats before payment. */
   flightOffer?: FlightOfferDTO | null;
+  /** Change-flight flow context (optional). */
+  flowContext?: FlightFlowContext;
+  changeOffer?: FlightOrderChangeOffer | null;
+  beforeChangeAmount?: string;
+  beforeChangeCurrency?: string;
+  quoteExpiresAt?: string | null;
+  /** Override travelers when parent already has search context. */
+  travelers?: { adults: number; children: number; infants?: number };
+  /** Override stay / travel dates (`YYYY-MM-DD`). */
+  stayDates?: { from: string; to: string };
+  /** Override room count for hotel sidebar. */
+  guestRooms?: number;
+  /** Pre-built payment URL for order change confirm. */
+  changePaymentHref?: string;
 }
 
-function getFlightPaymentPath(item: BookingItem): string {
-  return `/flights/payment?offer_id=${encodeURIComponent(String(item.id))}`;
+function getFlightPaymentPath(item: BookingItem, searchSessionId?: string | null): string {
+  const q = new URLSearchParams({ offer_id: String(item.id) });
+  if (searchSessionId?.trim()) q.set("search_session", searchSessionId.trim());
+  return `/flights/payment?${q.toString()}`;
 }
 
 function getPaymentPath(type: BookingItemType): string {
@@ -132,25 +164,79 @@ export function BookingSidebar({
   staysQuoteLoading = false,
   requiresStaysQuote = false,
   flightOffer = null,
+  flowContext: flowContextProp,
+  changeOffer = null,
+  beforeChangeAmount,
+  beforeChangeCurrency,
+  quoteExpiresAt = null,
+  changePaymentHref,
+  travelers: travelersProp,
+  stayDates: stayDatesProp,
+  guestRooms: guestRoomsProp,
 }: BookingSidebarProps) {
+  const flowContext = defaultFlowContext(flowContextProp);
+  const isChangeFlow = isChangeFlightFlow(flowContext);
+  const changeBookingId = isChangeFlow ? flowContext.bookingId : "";
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const flightSearchSessionId = searchParams.get("search_session");
   const tb = useTranslations("Booking.sidebar");
+  const tChange = useTranslations("Flights.change");
+  const tFlightTab = useTranslations("Flights.tab");
   const locale = useLocale();
   const { formatPrice } = useCurrency();
   const isRtl = locale === "ar" || locale === "ur";
 
-  const [checkIn, setCheckIn] = useState("2026-04-17");
-  const [checkOut, setCheckOut] = useState("2026-04-24");
+  const isHotel = type === "hotel";
+  const isFlight = type === "flight";
 
+  const flightSidebarMeta = useMemo(
+    () => (isFlight ? resolveFlightBookingSidebarMeta(flightOffer) : null),
+    [isFlight, flightOffer],
+  );
+  const hotelSidebarMeta = useMemo(
+    () => (isHotel ? resolveHotelBookingSidebarMeta(staysQuote) : null),
+    [isHotel, staysQuote],
+  );
+  const carSidebarDates = useMemo(
+    () => (type === "car" ? resolveCarBookingSidebarMeta() : null),
+    [type],
+  );
+
+  const adults =
+    travelersProp?.adults ??
+    flightSidebarMeta?.travelers.adults ??
+    hotelSidebarMeta?.travelers.adults ??
+    1;
+  const children =
+    travelersProp?.children ??
+    flightSidebarMeta?.travelers.children ??
+    hotelSidebarMeta?.travelers.children ??
+    0;
+  const infants =
+    travelersProp?.infants ??
+    flightSidebarMeta?.travelers.infants ??
+    hotelSidebarMeta?.travelers.infants ??
+    0;
+  const checkIn =
+    stayDatesProp?.from ??
+    flightSidebarMeta?.dates.checkIn ??
+    hotelSidebarMeta?.dates.checkIn ??
+    carSidebarDates?.checkIn ??
+    "";
+  const checkOut =
+    stayDatesProp?.to ??
+    flightSidebarMeta?.dates.checkOut ??
+    hotelSidebarMeta?.dates.checkOut ??
+    carSidebarDates?.checkOut ??
+    "";
+
+  const [rooms, setRooms] = useState(guestRoomsProp ?? hotelSidebarMeta?.rooms ?? 1);
   useEffect(() => {
-    if (staysQuote) {
-      setCheckIn(staysQuote.checkIn);
-      setCheckOut(staysQuote.checkOut);
-    }
-  }, [staysQuote]);
-  const [adults, setAdults] = useState(2);
-  const [children, setChildren] = useState(0);
-  const [rooms, setRooms] = useState(1);
+    const next = guestRoomsProp ?? hotelSidebarMeta?.rooms;
+    if (next != null) setRooms(next);
+  }, [guestRoomsProp, hotelSidebarMeta?.rooms]);
+
   const [extras, setExtras] = useState<string[]>([]);
 
   const [duffelBagQuantities, setDuffelBagQuantities] = useState<Record<string, number>>({});
@@ -213,16 +299,46 @@ export function BookingSidebar({
   }, [flightOffer?.id]);
 
   useEffect(() => {
+    if (!isChangeFlow || !changeBookingId) return;
+    try {
+      const raw = sessionStorage.getItem(`ttu_flight_change_${changeBookingId}`);
+      if (!raw) return;
+      const session = JSON.parse(raw) as { ancillaries?: StoredFlightAncillaries };
+      const p = session.ancillaries;
+      if (!p) return;
+      if (p.bagQuantities && typeof p.bagQuantities === "object") setDuffelBagQuantities(p.bagQuantities);
+      if (p.seatSelections && typeof p.seatSelections === "object") setDuffelSeatSelections(p.seatSelections);
+      if (p.seatPassengerId) setDuffelSeatPassengerId(p.seatPassengerId);
+    } catch {
+      /* ignore */
+    }
+  }, [isChangeFlow, changeBookingId]);
+
+  useEffect(() => {
     if (!flightOffer) return;
+    const skipSeatMaps =
+      isChangeFlow ||
+      flightOffer.id.startsWith("oco_") ||
+      flightOffer.available_services.length === 0;
+    if (skipSeatMaps) {
+      setSeatMaps([]);
+      setSeatMapsError(isChangeFlow ? tChange("ancillariesUnavailable") : null);
+      setSeatMapsLoading(false);
+      return;
+    }
     let cancelled = false;
     setSeatMapsError(null);
     setSeatMapsLoading(true);
-    getFlightSeatMaps(flightOffer.id)
+    getFlightSeatMapsDeduped(flightOffer.id)
       .then((r) => {
         if (!cancelled) setSeatMaps(r.seat_maps);
       })
       .catch((e: Error) => {
-        if (!cancelled) setSeatMapsError(e?.message ?? "Could not load seat maps");
+        if (!cancelled) {
+          setSeatMapsError(
+            isChangeFlow ? tChange("ancillariesUnavailable") : e?.message ?? "Could not load seat maps",
+          );
+        }
       })
       .finally(() => {
         if (!cancelled) setSeatMapsLoading(false);
@@ -230,7 +346,7 @@ export function BookingSidebar({
     return () => {
       cancelled = true;
     };
-  }, [flightOffer?.id]);
+  }, [flightOffer?.id, isChangeFlow, tChange]);
 
   const duffelEstimates = useMemo(() => {
     if (!flightOffer) return null;
@@ -261,8 +377,9 @@ export function BookingSidebar({
 
   const basePrice = item.price ?? 0;
   const currency = item.currency ?? "USD";
-  const isHotel = type === "hotel";
-  const isFlight = type === "flight";
+  const changeDelta = changeOffer ? parseChangeDelta(changeOffer) : null;
+  const changeCurrency =
+    changeOffer?.change_total_currency ?? beforeChangeCurrency ?? currency;
   /** Sticky total bar + bottom sheet on small viewports (hotel + flight detail pages). */
   const useMobileBottomSheet = isHotel || isFlight;
   const hasHotelRooms = isHotel && availableRooms && availableRooms.length > 0;
@@ -317,6 +434,14 @@ export function BookingSidebar({
           ? `${flightOffer.total_currency} ${duffelEstimates.total}`
           : `${currency} ${Number(price).toFixed(2)}`;
 
+  const travelerPartySummary = useMemo(() => {
+    const base = tb("partySummary", { adults, children });
+    if (infants > 0) {
+      return `${base}, ${infants} ${tFlightTab("infantsLabel").toLowerCase()}`;
+    }
+    return base;
+  }, [adults, children, infants, tb, tFlightTab]);
+
   const handleProceedToPayment = () => {
     const title = getItemTitle(item, type);
     const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
@@ -326,7 +451,7 @@ export function BookingSidebar({
     if (type === "flight") {
       options.push({
         label: tb("summaryTravelers"),
-        value: tb("partySummary", { adults, children }),
+        value: travelerPartySummary,
       });
       options.push({ label: tb("summaryDates"), value: `${checkIn} - ${checkOut}` });
       if (flightOffer) {
@@ -356,7 +481,7 @@ export function BookingSidebar({
     } else if (type === "hotel") {
       options.push({
         label: tb("summaryGuests"),
-        value: tb("partySummary", { adults, children }),
+        value: travelerPartySummary,
       });
       options.push({ label: tb("summaryRooms"), value: String(totalRooms > 0 ? totalRooms : rooms) });
       options.push({ label: tb("summaryStay"), value: `${checkIn} - ${checkOut}` });
@@ -400,6 +525,12 @@ export function BookingSidebar({
           seatPassengerId: duffelSeatPassengerId,
         };
         sessionStorage.setItem(flightAncillariesStorageKey(flightOffer.id), JSON.stringify(payload));
+        if (!isChangeFlow) {
+          writeFlightOfferSnapshot(flightOffer);
+        }
+        if (isChangeFlow && changeBookingId) {
+          patchFlightChangeSession(changeBookingId, { ancillaries: payload });
+        }
       }
       sessionStorage.setItem(BOOKING_STORAGE_KEY, JSON.stringify(bookingDetails));
       if (type === "hotel" && staysQuote) {
@@ -416,7 +547,14 @@ export function BookingSidebar({
         router.push(`/hotels/payment?quote_id=${encodeURIComponent(staysQuote.quoteId)}`);
         return;
       }
-      const path = type === "flight" ? getFlightPaymentPath(item) : getPaymentPath(type);
+      if (isChangeFlow && changePaymentHref) {
+        router.push(changePaymentHref);
+        return;
+      }
+      const path =
+        type === "flight"
+          ? getFlightPaymentPath(item, flightSearchSessionId)
+          : getPaymentPath(type);
       router.push(path);
     } catch {
       console.error("Failed to store booking details");
@@ -486,14 +624,14 @@ export function BookingSidebar({
             <Input
               type="date"
               value={checkIn}
-              disabled={true}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCheckIn(e.target.value)}
+              disabled
+              readOnly
             />
             <Input
               type="date"
               value={checkOut}
-              disabled={true}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCheckOut(e.target.value)}
+              disabled
+              readOnly
             />
           </div>
         </div>
@@ -513,8 +651,8 @@ export function BookingSidebar({
                   min={1}
                   max={9}
                   value={adults}
-                  disabled={true}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAdults(Number(e.target.value) || 1)}
+                  disabled
+                  readOnly
                 />
               </div>
               <div className="flex-1">
@@ -523,11 +661,24 @@ export function BookingSidebar({
                   type="number"
                   min={0}
                   max={9}
-                  disabled={true}
+                  disabled
+                  readOnly
                   value={children}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setChildren(Number(e.target.value) || 0)}
                 />
               </div>
+              {infants > 0 ? (
+                <div className="flex-1">
+                  <label className="text-xs text-muted-foreground">{tFlightTab("infantsLabel")}</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={9}
+                    disabled
+                    readOnly
+                    value={infants}
+                  />
+                </div>
+              ) : null}
             </div>
             {type === "hotel" && !hasHotelRooms && (
               <div className="mt-2">
@@ -546,14 +697,14 @@ export function BookingSidebar({
 
         {/* Flight: Duffel bags & seats (detail page) or legacy placeholder extras */}
         {type === "flight" && flightOffer ? (
-          <div className="rounded-xl border border-border bg-muted/20">
+          <div className="rounded-t-xl border border-border bg-muted/20">
             <button
               type="button"
               id={bagsSeatsTriggerId}
               aria-expanded={bagsSeatsOpen}
               aria-controls={bagsSeatsPanelId}
               onClick={() => setBagsSeatsOpen((o) => !o)}
-              className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-3 text-start text-sm font-medium text-foreground hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background transition-colors"
+              className="flex w-full items-center justify-between gap-2 rounded-t-xl px-3 py-3 text-start text-sm font-medium text-foreground hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background transition-colors"
             >
               <span className="flex min-w-0 flex-1 items-center gap-2">
                 <Luggage className="h-4 w-4 shrink-0 text-foreground dark:text-white" strokeWidth={2} aria-hidden />
@@ -638,7 +789,65 @@ export function BookingSidebar({
 
         {/* Price summary */}
         <div className="pt-4 border-t border-border">
-          {type === "flight" && flightOffer && duffelEstimates ? (
+          {isChangeFlow && changeOffer && changeDelta !== null ? (
+            <>
+              {beforeChangeAmount ? (
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{tChange("previousTotal")}</span>
+                  <span className="font-semibold text-foreground">
+                    {formatPrice(
+                      Number.parseFloat(beforeChangeAmount),
+                      beforeChangeCurrency ?? changeCurrency,
+                      locale,
+                    )}
+                  </span>
+                </div>
+              ) : null}
+              {changeOffer.new_total_amount ? (
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{tChange("newOrderTotal")}</span>
+                  <span className="font-semibold text-foreground">
+                    {formatPrice(
+                      Number.parseFloat(changeOffer.new_total_amount),
+                      changeOffer.new_total_currency ?? changeCurrency,
+                      locale,
+                    )}
+                  </span>
+                </div>
+              ) : null}
+              {changeOffer.penalty_total_amount ? (
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{tChange("airlinePenalty")}</span>
+                  <span className="font-semibold text-foreground">
+                    {formatPrice(
+                      Number.parseFloat(changeOffer.penalty_total_amount),
+                      changeOffer.penalty_total_currency ?? changeCurrency,
+                      locale,
+                    )}
+                  </span>
+                </div>
+              ) : null}
+              <div className="mt-4 flex items-end justify-between">
+                <span className="font-medium text-foreground">{tChange("changeCost")}</span>
+                <span className="text-2xl font-bold text-primary">
+                  {changeDelta < 0
+                    ? tChange("refundAmount", {
+                        amount: formatPrice(Math.abs(changeDelta), changeCurrency, locale),
+                      })
+                    : changeDelta === 0
+                      ? tChange("noExtraCharge")
+                      : formatPrice(changeDelta, changeCurrency, locale)}
+                </span>
+              </div>
+              {quoteExpiresAt ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {tChange("quoteExpires", {
+                    date: new Date(quoteExpiresAt).toLocaleString(locale),
+                  })}
+                </p>
+              ) : null}
+            </>
+          ) : type === "flight" && flightOffer && duffelEstimates ? (
             <>
               <div className="mb-2 flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">{tb("fare")}</span>
@@ -691,7 +900,9 @@ export function BookingSidebar({
             ? tb("gettingQuote")
             : hotelMustPickRoom
               ? tb("selectRoom")
-              : tb("proceedToPayment")}
+              : isChangeFlow
+                ? tChange("continueToPayment")
+                : tb("proceedToPayment")}
         </Button>
       </div>
     </div>

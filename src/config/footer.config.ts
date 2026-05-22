@@ -49,14 +49,14 @@ export const SOCIAL_LINKS: FooterSocialLink[] = [
 ];
 
 
-// Head Office: 920 Hylan Blvd Staten Island, NewYork 10305
+// Head Office: 
 
 // Regional office: 0-961 First Floor, Souq-e-Idrees, Main Muree Road Rawalpindi
 
 // Regional office: 781 First Floor, Shadman Colony, Lahore
 export const CONTACT: FooterContact = {
-  address: "920 Hylan Blvd Staten Island, NewYork 10305",
-  phone: "+92 (321)-9400142",
+  // address: "920 Hylan Blvd Staten Island, NewYork 10305",
+  phone: "+1 800 443 0456",
   email: "info@traveltourup.com",
 };
 

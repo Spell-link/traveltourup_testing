@@ -2,7 +2,8 @@
 
 import type { FlightCardData } from "@/components/ui/Card";
 import { FeaturedFlightsShell } from "@/components/flights/FeaturedFlightsShell";
-import { FeaturedFlightsGrid, FeaturedFlightsGridSkeleton } from "@/components/flights/FeaturedFlightsGrid";
+import { FeaturedFlightsGridSkeleton } from "@/components/flights/FlightSkeletons";
+import { FeaturedFlightsGrid } from "@/components/flights/FeaturedFlightsGrid";
 import { useFeaturedFlightCardsQuery } from "@/lib/http/featured-swr";
 
 /**

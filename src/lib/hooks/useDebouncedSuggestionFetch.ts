@@ -10,7 +10,7 @@ export type DebouncedSuggestionFetchOptions<T> = {
   minLength?: number;
   /** Default 320 (matches Duffel dashboard-style airport/place lookup). */
   debounceMs?: number;
-  fetcher: (trimmedQuery: string) => Promise<T[]>;
+  fetcher: (trimmedQuery: string, signal?: AbortSignal) => Promise<T[]>;
 };
 
 /**
@@ -46,22 +46,27 @@ export function useDebouncedSuggestionFetch<T>({
     }
     setRows([]);
     let cancelled = false;
+    let abortController: AbortController | null = null;
     const timer = window.setTimeout(() => {
+      abortController?.abort();
+      abortController = new AbortController();
+      const signal = abortController.signal;
       setLoading(true);
       fetcherRef
-        .current(q)
+        .current(q, signal)
         .then((list) => {
-          if (!cancelled) setRows(list);
+          if (!cancelled && !signal.aborted) setRows(list);
         })
         .catch(() => {
-          if (!cancelled) setRows([]);
+          if (!cancelled && !signal.aborted) setRows([]);
         })
         .finally(() => {
-          if (!cancelled) setLoading(false);
+          if (!cancelled && !signal.aborted) setLoading(false);
         });
     }, debounceMs);
     return () => {
       cancelled = true;
+      abortController?.abort();
       window.clearTimeout(timer);
       setLoading(false);
     };

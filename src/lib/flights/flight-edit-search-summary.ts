@@ -7,7 +7,7 @@ export function formatFlightSearchShortDate(ymd: string, locale: string): string
   return new Date(y, m - 1, d).toLocaleDateString(locale, { day: "numeric", month: "short" });
 }
 
-function cabinTranslationKey(cabinRaw: string): string {
+export function cabinTranslationKey(cabinRaw: string): string {
   switch (cabinRaw) {
     case "premium_economy":
       return "cabinPremiumEconomy";

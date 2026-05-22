@@ -15,6 +15,14 @@ export const bookingQuerySchema = paginationQuerySchema
       (v) => (v === null || v === "" ? undefined : v),
       z.string().optional(),
     ),
+    q: z.preprocess(
+      (v) => (v === null || v === "" ? undefined : v),
+      z.string().optional(),
+    ),
+    sort: z
+      .enum(["created_at", "total_amount", "status", "booking_ref_no"])
+      .default("created_at"),
+    order: z.enum(["asc", "desc"]).default("desc"),
   });
 
 const jsonPayload = z.record(z.string(), z.unknown()).optional();

@@ -89,6 +89,38 @@ const menuItems: MenuSection[] = [
         href: "/admin/flights",
         icon: PlaneTakeoff,
         badge: null,
+        subItems: [
+          {
+            title: "Flight bookings",
+            href: "/admin/flights",
+            icon: Eye,
+          },
+          {
+            title: "Revenue",
+            href: "/admin/flights/revenue",
+            icon: Eye,
+          },
+          {
+            title: "Financial ledger",
+            href: "/admin/flights/ledger",
+            icon: Plane,
+          },
+          {
+            title: "Pricing rules",
+            href: "/admin/flights/pricing-rules",
+            icon: Eye,
+          },
+          {
+            title: "Orphan PIT",
+            href: "/admin/flights/orphan-pit",
+            icon: Eye,
+          },
+          {
+            title: "Webhooks",
+            href: "/admin/flights/webhooks",
+            icon: Eye,
+          },
+        ],
       },
     ],
   },

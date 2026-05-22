@@ -72,7 +72,7 @@ export async function handleLogin(req: NextRequest): Promise<Response> {
 // --------------- Signup ---------------
 /**
  * Email delivery: configure Supabase Auth “Send Email” hook →
- * `POST /api/auth/supabase-email-hook` so confirmation uses Resend + React Email.
+ * `POST /api/auth/supabase-email-hook` so confirmation uses SMTP + React Email.
  * Do not call `sendEmail({ type: "welcome" })` here if the hook already sends signup/confirm
  * mail — that would duplicate messages. Optional marketing welcome can be sent after a
  * confirmed session (e.g. via a job or `POST /api/email/send` with EMAIL_SERVER_SECRET).

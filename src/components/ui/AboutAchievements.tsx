@@ -51,7 +51,7 @@ const AboutAchievements = () => {
           </div>
         </div>
 
-        <div className="rounded-[10px] md:rounded-[1rem] overflow-hidden w-full relative min-h-[180px] md:min-h-[200px] lg:min-h-[220px]">
+        <div className="rounded-[10px] md:rounded-[1rem] overflow-hidden w-full relative min-h-[250px] md:min-h-[250px] lg:min-h-[250px]">
           <RandomImageAnimation />
         </div>
       </div>

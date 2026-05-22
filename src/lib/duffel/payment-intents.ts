@@ -11,6 +11,11 @@ export type DuffelPaymentIntentResource = {
   created_at?: string;
   updated_at?: string;
   confirmed_at?: string | null;
+  /** Present after capture — Duffel Payments processing fee. */
+  fees_amount?: string | null;
+  fees_currency?: string | null;
+  /** Amount credited to balance after fees. */
+  net_amount?: string | null;
 };
 
 type Wrapped<T> = { data: T };

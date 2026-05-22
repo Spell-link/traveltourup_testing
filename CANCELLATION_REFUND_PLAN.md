@@ -66,11 +66,31 @@ Duffel cancellation guide: [Cancelling an Order](https://duffel.com/docs/guides/
 - **Stale quote (`order_cancellation_stale`)**: mapped to **409** `ORDER_CANCELLATION_STALE`.
 - **Airline credits**: no Duffel refund API call; user messaging in cancel modal.
 - **Currency mismatch / no PIT / zero refund**: attempt row + `refund_failed` or derived `payment_status` without calling Duffel where inappropriate.
-- **Webhook vs app**: [`duffel-webhook-handlers.ts`](src/lib/services/duffel/duffel-webhook-handlers.ts) no longer forces `payment_status: "refunded"` on external cancel; preserves terminal payment states and otherwise sets `refund_processing`.
+- **Webhook vs app**: [`duffel-webhook-handlers.ts`](src/lib/services/duffel/duffel-webhook-handlers.ts) syncs external cancels via [`flight-webhook-cancel.service.ts`](src/lib/services/flights/flight-webhook-cancel.service.ts) — upserts `FlightOrderCancellation`, cancels booking, sends email, and calls `settleDuffelFlightRefundAfterCancellation` on the card path. `refund.*` webhooks and the ops poller use shared finalization in [`flight-refund.service.ts`](src/lib/services/flights/flight-refund.service.ts) (ledger + refund email, idempotent).
+
+### Ops automation (production)
+
+| Cron (`vercel.json`) | Route | Role |
+|----------------------|-------|------|
+| `*/15 * * * *` | `POST /api/v1/ops/flights/poll-refunds` | Poll pending cancellation refunds **and** compensation refunds on PIT rows |
+| `0 * * * *` | `POST /api/v1/ops/flights/expire-cancellation-quotes` | Expire stale cancel quotes |
+| `*/30 * * * *` | `POST /api/v1/ops/flights/sweep-orphan-pit` | Alert orphan PITs; optional auto-refund when `FLIGHT_ORPHAN_PIT_AUTO_REFUND=1` |
+
+All ops routes require `Authorization: Bearer <OPS_JOB_TOKEN>` in production (see `.env.example`).
+
+### Admin retry
+
+| Route | Role |
+|-------|------|
+| `POST /api/v1/admin/flights/bookings/:id/refund-retry` | Admin retry after `refund_failed` (`bookings:manage`) |
+| `POST /api/v1/admin/flights/payment-intents/:duffelIntentId/compensation-refund` | Retry booking-failed / orphan PIT compensation refund |
+
+UI: admin flight detail (refund retry) and orphan PIT queue (compensation refund buttons).
 
 ### Security
 
-- Reuses `assertCanCancelFlightBooking` (`bookings:manage` or `bookings:cancel_own` + owner) for status, cancel, and refund retry.
+- Reuses `assertCanCancelFlightBooking` (`bookings:manage` or `bookings:cancel_own` + owner) for status, cancel, and customer refund retry.
+- Admin retry routes require `bookings:manage`.
 - One refund attempt row per cancellation id prevents double settlement at DB level; Duffel refund id stored when succeeded.
 
 ### Best practices
@@ -84,4 +104,4 @@ Duffel cancellation guide: [Cancelling an Order](https://duffel.com/docs/guides/
 
 - Apply migration: `npx prisma migrate deploy` (or `migrate dev` locally).
 - Duffel Refunds product availability: see Duffel docs banner on refunds pages for account eligibility.
-- Pending Duffel refund status: UI offers “Refresh status”; a future enhancement could poll `GET /payments/refunds/:id`.
+- Pending Duffel refund status: customer UI offers “Refresh status”; ops cron polls every 15 minutes via `poll-refunds`.

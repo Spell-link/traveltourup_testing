@@ -6,7 +6,7 @@
     "cars": "کاریں",
     "hotels": "ہوٹلز",
     "contact": "رابطہ",
-    "phoneDisplay": "+92 (321)-9400142",
+    "phoneDisplay": "+1 800 443 0456",
     "emailDisplay": "info@traveltourup.com",
     "theme": "تھیم",
     "currency": "کرنسی",
@@ -26,7 +26,8 @@
     "themeSettingsAria": "تھیم کی ترتیبات",
     "lightModeAria": "لائٹ موڈ",
     "darkModeAria": "ڈارک موڈ",
-    "adminPanel": "ایڈمن پینل"
+    "adminPanel": "ایڈمن پینل",
+    "allServices": "تمام سروسز"
   },
   "Footer": {
     "rights": "تمام حقوق محفوظ ہیں۔",
@@ -297,7 +298,8 @@
       "sliceTakeoffLabel": "ٹیک آف",
       "sliceLandingLabel": "لینڈنگ",
       "timeAxisAnyTime": "کسی بھی وقت",
-      "flightTimeConfirm": "تصدیق"
+      "flightTimeConfirm": "تصدیق",
+      "flightTime": "پرواز کے اوقات"
     },
     "sort": {
       "best": "بہترین میچ",
@@ -391,6 +393,26 @@
       "contactDetailsHint": "بکنگ کی تصدیق اور ایر لائن رابطے کے لیے (Lead مسافر)۔",
       "emailLabel": "ای میل",
       "phoneOptionalLabel": "فون (اختیاری)",
+      "phoneRequiredLabel": "فون (لازمی — ایر لائن / Duffel)",
+      "validationGivenNameRequired": "پہلا نام درکار ہے۔",
+      "validationFamilyNameRequired": "خاندانی نام درکار ہے۔",
+      "validationBornOnFormat": "درست تاریخ پیدائش درج کریں۔",
+      "validationBornOnBefore": "اس پرواز کے لیے تاریخ پیدائش {date} یا اس سے پہلے ہونی چاہیے۔",
+      "validationLeadEmail": "لیڈ مسافر کے لیے درست ای میل درج کریں۔",
+      "validationLeadPhone": "لیڈ مسافر کا فون نمبر لازمی ہے۔",
+      "validationInfantAdult": "شیر خوار کے لیے بالغ مسافر منتخب کریں۔",
+      "validationGeneric": "یہ فیلڈ چیک کریں اور دوبارہ کوشش کریں۔",
+      "bookingFailureRefundedTitle": "رقم واپس کر دی گئی",
+      "bookingFailureRefundedBody": "آپ کے کارڈ سے کٹوتی کے بعد ایر لائن پرواز تصدیق نہ کر سکی۔ رقم واپس کر دی گئی؛ شو ہوتے کئی کاروباری دن لگ سکتے ہیں۔",
+      "bookingFailureRefundPendingTitle": "واپسی جاری ہے",
+      "bookingFailureRefundPendingBody": "بکنگ تصدیق نہ ہو سکی۔ ہم نے آپ کے کارڈ پر واپسی شروع کی ہے؛ اس میں وقت لگ سکتا ہے۔",
+      "bookingFailureAfterPaymentTitle": "بکنگ مکمل نہ ہو سکی",
+      "bookingFailureAfterPaymentBody": "کارڈ سے رقم لی گئی لیکن روٹ تصدیق نہ ہوا۔ اگر واپسی نظر نہ آئے تو نیچے دیے گئے حوالے کے ساتھ سپورٹ سے رابطہ کریں۔",
+      "bookingFailurePitLabel": "ادائیگی کا حوالہ",
+      "bookingFailureRefundLabel": "واپسی کا حوالہ",
+      "bookingFailureEmailNotice": "جب ممکن ہو ہم لیڈ مسافر کو ای میل بھیجتے ہیں۔",
+      "bookingFailureSearchAgain": "دوبارہ پروازیں تلاش کریں",
+      "bookingFailureClose": "بند کریں",
       "continueToPayment": "ادائیگی پر جاری رکھیں",
       "placeHold": "ہوڈ رکھیں",
       "preparingPayment": "ادائیگی تیار ہو رہی ہے…",
@@ -399,7 +421,7 @@
       "confirmingBooking": "آپ کی بکنگ تصدیق ہو رہی ہے…",
       "pciNotice": "ادائیگیاں ڈافل کے ذریعے محفوظ طریقے پر۔ کارڈ کی تفصیلات PCI معیارات کے مطابق سنبھالی جاتی ہیں۔",
       "cardDetailsTitle": "کارڈ کی تفصیلات",
-      "hintIncompleteForm": "تمام نام اور تاریخ پیدائش، لیڈ مسافر کے لیے درست ای میل، اور ضرورت ہو تو شیر خوار کو بالغ سے جوڑیں۔",
+      "hintIncompleteForm": "ہر مسافر کا مکمل نام اور تاریخ پیدائش، لیڈ کے لیے درست ای میل اور فون، اور ہر شیر خوار کو بالغ سے جوڑیں۔ پہلے سگمنٹ کے مطابق تاریخ پیدائش درکار ہے۔",
       "hintHoldNoCharge": "ابھی کارڈ پر چارج نہیں — ہوڈ ختم ہونے سے پہلے میری بکنگز سے ادائیگی مکمل کریں۔",
       "hintPayExtrasOnOffer": "بیگ اور سیٹس آفر صفحہ پر منتخب کیے گئے۔ ادائیگی سے پہلے تبدیلی کے لیے واپس جا سکتے ہیں۔",
       "orderSummaryTitle": "آرڈر خلاصہ",
@@ -420,6 +442,17 @@
       "successReferencePrefix": "حوالہ",
       "successAirlinePnr": "ایر لائن PNR",
       "viewYourBooking": "اپنی بکنگ دیکھیں",
+      "successDialogPaidDescription": "آپ کی ادائیگی موصول ہو گئی اور ایئر لائن نے ٹکٹ کی تصدیق کر دی۔ نیچے دیے گئے حوالے محفوظ رکھیں۔",
+      "successDialogHoldDescription": "آپ کا کرایہ ہوڈ پر ہے۔ میعاد ختم ہونے سے پہلے «میری بکنگز» سے ادائیگی مکمل کریں۔",
+      "successDialogRouteLabel": "سفر کا راستہ",
+      "successDialogBookingRefLabel": "بکنگ حوالہ",
+      "successDialogTotalPaidLabel": "کل ادائیگی",
+      "successDialogPassengersLabel": "مسافر",
+      "successDialogEmailSentTo": "ہم نے {email} پر آپ کے روٹ اور بکنگ حوالہ جات کے ساتھ تصدیقی ای میل بھیجی ہے۔",
+      "successDialogEmailSentGeneric": "ہم نے آپ کے روٹ اور بکنگ حوالہ جات کے ساتھ تصدیقی ای میل بھیجی ہے۔",
+      "successDialogBackToFlights": "مزید پروازیں تلاش کریں",
+      "successDialogClose": "بند کریں",
+      "successDialogCopied": "کاپی ہو گیا",
       "errorMissingCheckoutData": "چیک آؤٹ ڈیٹا نامکمل ہے۔",
       "errorCouldNotStartPayment": "ادائیگی شروع نہیں ہو سکی",
       "errorCouldNotPlaceHold": "ہوڈ نہیں رکھا جا سکا",
@@ -711,7 +744,25 @@
       "nightPlural": "راتیں",
       "totalStayPhrase": "کل قیام",
       "extrasBagServices": "{qty} اضافی سروس یونٹ",
-      "extrasSeatsChosen": "{count} نشست/نشستیں"
+      "extrasSeatsChosen": "{count} نشست/نشستیں",
+      "bagsSectionTitle": "بیگ اور اضافی",
+      "bagsSectionDescription": "جب دستیاب ہوں تو ایئر لائن کی اختیاری سروسز شامل کریں۔ ادائیگی سے پہلے سرور پر قیمتیں تصدیق ہوتی ہیں۔",
+      "seatWindowTitle": "کھڑکی والے نشست کا انتخاب",
+      "seatWindowDescription": "ہر فلائٹ سیکمنٹ کے لیے دستیاب کھڑکی والی نشست منتخب کریں۔ اضافی چارجز ادائیگی پر شامل ہوں گے۔",
+      "seatWindowLeft": "بائیں کھڑکی",
+      "seatWindowRight": "دائیں کھڑکی",
+      "seatPositionOther": "معمولی نشست",
+      "seatSelectedHeading": "آپ کی منتخب نشستیں",
+      "seatClearSelection": "نشست ہٹائیں",
+      "seatMapUnavailable": "اس آفر کے لیے سیٹ میپ دستیاب نہیں۔",
+      "seatNoWindowAvailable": "اس مسافر کے لیے کوئی کھڑکی والی نشست دستیاب نہیں۔ نیچے مکمل سیٹ میپ کھولیں۔",
+      "seatAllSegments": "تمام فلائٹس",
+      "seatSelected": "منتخب",
+      "seatSelect": "منتخب کریں",
+      "seatDuffelNote": "نشست کی قیمتیں Duffel کے ذریعے ایئر لائن سے آتی ہیں اور ادائیگی سے پہلے دوبارہ تصدیق ہوتی ہیں۔",
+      "seatShowFullMap": "مکمل سیٹ میپ دیکھیں",
+      "seatHideFullMap": "سیٹ میپ چھپائیں",
+      "seatPassengerHint": "{name} کے لیے نشستیں۔ دوسروں کے لیے اوپر مسافر بدلیں۔"
     }
   },
   "Contact": {
@@ -1277,6 +1328,51 @@
     "connectText": "مزید معلومات کے لیے رابطہ کریں۔",
     "contactButton": "ہم سے رابطہ کریں"
   },
+  "BookingMoney": {
+    "paymentTimelineTitle": "Payment timeline",
+    "refresh": "Refresh",
+    "timelineLoadError": "Could not load payment history.",
+    "ledgerCta": "All flight payments & refunds",
+    "ledgerCtaShort": "View full flight payment history in your account.",
+    "statusHeading": "Payment",
+    "events": {
+      "intent_created": "Payment authorised",
+      "intent_succeeded": "Payment captured",
+      "intent_failed": "Payment failed",
+      "order_placed": "Booking confirmed by airline",
+      "order_failed": "Airline could not confirm — refund in progress",
+      "refund_initiated": "Refund initiated",
+      "refund_succeeded": "Refund completed",
+      "refund_failed": "Refund failed",
+      "cancel_quoted": "Cancellation quote requested",
+      "cancel_confirmed": "Cancellation confirmed",
+      "change_quoted": "Flight change quoted",
+      "change_confirmed": "Flight change confirmed"
+    },
+    "paymentStatusLabel": {
+      "unpaid": "Unpaid",
+      "paid": "Paid",
+      "refund_processing": "Refund processing",
+      "refund_pending": "Refund pending",
+      "refunded": "Refunded",
+      "partially_refunded": "Partially refunded",
+      "refund_failed": "Refund failed",
+      "credit_issued": "Airline credit issued"
+    },
+    "paymentStatusHint": {
+      "unpaid": "Complete payment to confirm this booking where applicable.",
+      "paid": "Your payment was captured successfully for this itinerary.",
+      "refund_processing": "We are sending money back to your original payment method. Most card refunds post within several business days.",
+      "refund_pending": "A refund is queued with our payments partner. You will see movement on the timeline below as it progresses.",
+      "refunded": "The refund to your card or account has completed.",
+      "partially_refunded": "A partial refund was applied. Check the payment timeline for amounts.",
+      "refund_failed": "The automatic refund could not finish. Use “Retry refund” below or contact support with your booking reference.",
+      "credit_issued": "This cancellation was settled as airline credits. Check your confirmation email for codes and instructions."
+    },
+    "cancelRefundProcessing": "Your card refund is processing. This can take a short time to complete with our payments partner.",
+    "cancelRefundFailed": "The booking was cancelled but the automatic card refund did not complete. You can retry once your payment provider allows.",
+    "cancelRefundRetry": "Retry refund"
+  },
   "Seo": {
     "routes": {
       "home": {
@@ -1410,6 +1506,12 @@
         "description": "TravelTourUp بکنگ کی تصدیق اور حوالہ جات۔",
         "ogTitle": "بکنگ کی تفصیلات — TravelTourUp",
         "ogDescription": "تصدیق اور سفر کی تفصیلات۔"
+      },
+      "profile_flight_activity": {
+        "title": "Flight payments & refunds | TravelTourUp",
+        "description": "Review flight charges, refunds, and payment timeline entries in one place.",
+        "ogTitle": "Flight payments — TravelTourUp",
+        "ogDescription": "Your flight debit and credit history."
       }
     }
   },
@@ -1419,6 +1521,7 @@
     "detailHotel": "ہوٹل کی تفصیل",
     "detailFlight": "پرواز کی تفصیل",
     "detailCar": "کار کی تفصیل",
+    "detailBooking": "بکنگ کی تفصیل",
     "pages": {
       "about": {
         "title": "ہمارے بارے میں",
@@ -1491,6 +1594,10 @@
       "profile": {
         "title": "پروفائل",
         "description": "اپنے اکاؤنٹ اور ٹریول ترجیحات دیکھیں۔"
+      },
+      "bookings": {
+        "title": "بکنگز",
+        "description": "اپنی ٹریول بکنگز دیکھیں اور منظم کریں۔"
       }
     }
   }

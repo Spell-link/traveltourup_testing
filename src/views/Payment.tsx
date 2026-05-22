@@ -1,26 +1,25 @@
 "use client";
+
 import React, { Suspense, useEffect } from "react";
 import { FlightPaymentEntry } from "@/components/flights/FlightPaymentEntry";
-
-const suspenseFallback = (
-  <div className="min-h-screen bg-muted flex flex-col">
-    <div className="flex-grow pt-24 pb-12">
-      <div className="container mx-auto max-w-3xl min-h-[200px] animate-pulse rounded-xl bg-muted/60" />
-    </div>
-  </div>
-);
+import type { FlightCheckoutContactPrefill } from "@/components/flights/FlightCheckoutDuffel";
+import { FlightCheckoutPageSkeleton } from "@/components/flights/FlightSkeletons";
 
 /**
  * Booking-flow payment shell. Flights use Duffel Payments (`?offer_id=`).
  */
-const Payment = (): React.ReactElement => {
+const Payment = ({
+  contactPrefill = null,
+}: {
+  contactPrefill?: FlightCheckoutContactPrefill | null;
+}): React.ReactElement => {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
 
   return (
-    <Suspense fallback={suspenseFallback}>
-      <FlightPaymentEntry />
+    <Suspense fallback={<FlightCheckoutPageSkeleton />}>
+      <FlightPaymentEntry contactPrefill={contactPrefill} />
     </Suspense>
   );
 };

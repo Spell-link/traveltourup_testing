@@ -836,14 +836,47 @@ const HotelBook = () => {
     return () => window.removeEventListener(TTU_STAYS_SEARCH_STARTED_EVENT, onStaysSearchStart);
   }, []);
 
+  useEffect(() => {
+    if (!showMobileFilters) return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    const prevBodyTouchAction = body.style.touchAction;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    body.style.touchAction = "none";
+    return () => {
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+      body.style.touchAction = prevBodyTouchAction;
+    };
+  }, [showMobileFilters]);
+
+  /** Overlay uses `lg:hidden`; if viewport crosses to lg while open, body scroll stays locked unless we reset. */
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const closeWhenDesktopLayout = () => {
+      if (mql.matches) setShowMobileFilters(false);
+    };
+    closeWhenDesktopLayout();
+    mql.addEventListener("change", closeWhenDesktopLayout);
+    return () => mql.removeEventListener("change", closeWhenDesktopLayout);
+  }, []);
+
   const FilterSidebar = () => (
-    <div className="bg-card rounded-xl shadow-md border border-border lg:p-6  lg:mb-0">
+    <div className="bg-card lg:mb-0 lg:rounded-xl lg:border lg:border-border lg:p-6 lg:shadow-md">
       {hotelEditSummary ? (
         <EditSearchSummaryCard
           headline={hotelEditSummary.headline}
           lines={hotelEditSummary.lines}
           editLabel={hr("editSearchButton")}
           onEdit={() => setHotelEditSearchOpen(true)}
+          hotelMobileFullscreenEdit
+          onStaysSearchStart={() => {
+            setHotelEditSearchOpen(false);
+            setShowMobileFilters(false);
+          }}
         />
       ) : null}
       {/* Header */}
@@ -1149,26 +1182,38 @@ const HotelBook = () => {
           </div>
 
           {/* Mobile Filters Modal */}
-          {showMobileFilters && (
-            <div className="fixed inset-0 z-50 lg:hidden">
-              <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setShowMobileFilters(false)}></div>
-              <div className="absolute left-0 top-0 h-full  bg-card overflow-y-auto p-6">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-bold">{hr("filtersTitle")}</h2>
-                  <button onClick={() => setShowMobileFilters(false)}>
-                    <X className="text-2xl" />
-                  </button>
-                </div>
-                <FilterSidebar />
+          {showMobileFilters ? (
+            <div
+              className="fixed inset-0 z-50 flex h-dvh max-h-dvh flex-col bg-card lg:hidden"
+              role="dialog"
+              aria-modal="true"
+              aria-label={hr("filtersTitle")}
+            >
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
+                <h2 className="text-xl font-bold text-foreground">{hr("filtersTitle")}</h2>
                 <button
+                  type="button"
                   onClick={() => setShowMobileFilters(false)}
-                  className="w-full bg-primary text-primary-foreground py-3 rounded-lg font-semibold mt-4"
+                  className="rounded-lg p-1 text-foreground hover:bg-muted"
+                  aria-label={tc("close")}
+                >
+                  <X className="h-6 w-6" aria-hidden />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 dropdown-scrollbar">
+                <FilterSidebar />
+              </div>
+              <div className="shrink-0 border-t border-border bg-card p-4 sm:p-5">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileFilters(false)}
+                  className="w-full rounded-lg bg-primary py-3 font-semibold text-primary-foreground"
                 >
                   {tc("applyFilters")}
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Hotel Listings */}
           <div

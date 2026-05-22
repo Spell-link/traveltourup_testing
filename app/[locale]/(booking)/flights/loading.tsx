@@ -1,5 +1,11 @@
-import PageLoader from "@/components/shared/PageLoader";
+import { Suspense } from "react";
 
-export default function GenericLoading() {
-  return <PageLoader size="large" />;
+import { FlightsRouteLoadingPicker } from "@/components/flights/FlightsRouteLoadingPicker";
+
+export default function FlightsLoading() {
+  return (
+    <Suspense>
+      <FlightsRouteLoadingPicker />
+    </Suspense>
+  );
 }

@@ -1,8 +1,17 @@
 import type { BookingDetailDto, BookingListItemDto } from "@/lib/bookings/booking.types";
+import { parseDuffelOrderDisplay } from "@/lib/flights/duffel-order-display";
 
 type BookingLike = Pick<
   BookingListItemDto | BookingDetailDto,
-  "type" | "booking_ref_no" | "created_at" | "flight_booking" | "hotel_booking" | "car_booking" | "guest_data"
+  | "type"
+  | "booking_ref_no"
+  | "created_at"
+  | "total_amount"
+  | "currency"
+  | "flight_booking"
+  | "hotel_booking"
+  | "car_booking"
+  | "guest_data"
 >;
 
 function firstSliceFromItinerary(snapshot: unknown): {
@@ -15,11 +24,11 @@ function firstSliceFromItinerary(snapshot: unknown): {
   if (!Array.isArray(slices) || slices.length === 0) return null;
   const sl = slices[0];
   if (!sl || typeof sl !== "object") return null;
-  const origin =
+  let origin =
     typeof (sl as { origin_iata?: string }).origin_iata === "string"
       ? (sl as { origin_iata: string }).origin_iata
       : "";
-  const dest =
+  let dest =
     typeof (sl as { destination_iata?: string }).destination_iata === "string"
       ? (sl as { destination_iata: string }).destination_iata
       : "";
@@ -30,6 +39,26 @@ function firstSliceFromItinerary(snapshot: unknown): {
     if (typeof d === "string" && d.length >= 10) {
       departLabel = d.slice(0, 10);
     }
+  }
+  if ((!origin || !dest) && Array.isArray(segs) && segs.length > 0) {
+    const first = segs[0] as {
+      origin_iata?: string;
+      origin?: { iata_code?: string };
+    };
+    const last = segs[segs.length - 1] as {
+      destination_iata?: string;
+      destination?: { iata_code?: string };
+    };
+    origin =
+      origin ||
+      (typeof first.origin_iata === "string" ? first.origin_iata : first.origin?.iata_code) ||
+      "";
+    dest =
+      dest ||
+      (typeof last.destination_iata === "string"
+        ? last.destination_iata
+        : last.destination?.iata_code) ||
+      "";
   }
   if (!origin && !dest) return null;
   return { origin, destination: dest, departLabel };
@@ -81,6 +110,30 @@ export function bookingSummaryTitle(row: BookingLike): string {
     return "Car rental";
   }
   return `${bookingTypeLabel(row.type)} booking`;
+}
+
+/** Human route/title for profile booking detail breadcrumb (e.g. `JFK to LHR`). */
+export function bookingBreadcrumbTitle(row: BookingLike): string {
+  if (row.flight_booking) {
+    const fb = row.flight_booking;
+    const route = firstSliceFromItinerary(fb.itinerary_snapshot);
+    if (route?.origin && route.destination) {
+      return `${route.origin} to ${route.destination}`;
+    }
+    if ("order_raw" in fb && fb.order_raw) {
+      try {
+        const duffel = parseDuffelOrderDisplay(fb.order_raw, row.total_amount, row.currency);
+        const seg = duffel?.slices[0]?.segments[0];
+        if (seg?.originIata && seg?.destinationIata) {
+          return `${seg.originIata} to ${seg.destinationIata}`;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+  const summary = bookingSummaryTitle(row);
+  return summary.includes(" → ") ? summary.replace(" → ", " to ") : summary;
 }
 
 export function bookingSummarySubtitle(row: BookingLike): string | null {

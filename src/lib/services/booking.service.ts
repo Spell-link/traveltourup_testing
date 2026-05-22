@@ -48,10 +48,23 @@ export async function listBookings(input: {
     throw new ForbiddenError();
   }
 
+  const q = input.query.q?.trim();
   const where: Prisma.BookingWhereInput = {
     ...(canReadAll ? {} : { user_id: input.requestingUserId }),
     ...(input.query.status ? { status: input.query.status } : {}),
     ...(input.query.type ? { type: input.query.type } : {}),
+    ...(q
+      ? {
+          booking_ref_no: {
+            contains: q,
+            mode: "insensitive",
+          },
+        }
+      : {}),
+  };
+
+  const orderBy: Prisma.BookingOrderByWithRelationInput = {
+    [input.query.sort]: input.query.order,
   };
 
   const skip = (input.query.page - 1) * input.query.limit;
@@ -59,6 +72,7 @@ export async function listBookings(input: {
     where,
     skip,
     take: input.query.limit,
+    orderBy,
   });
 
   return {
@@ -83,13 +97,21 @@ export async function getBookingById(input: {
     throw new ForbiddenError();
   }
 
-  const row = await bookingRepository.findById(input.id);
+  let row = await bookingRepository.findById(input.id);
   if (!row) {
     throw new NotFoundError("Booking");
   }
 
   if (!canReadAll && row.user_id !== input.requestingUserId) {
     throw new ForbiddenError();
+  }
+
+  if (row.type === "flight" && row.status === "confirmed") {
+    const { reconcileFlightBookingTotalFromConfirmedChange } = await import(
+      "@/lib/services/flights/flight-order-change.service"
+    );
+    await reconcileFlightBookingTotalFromConfirmedChange(row.id);
+    row = (await bookingRepository.findById(input.id)) ?? row;
   }
 
   return serializeBookingResponse(row);

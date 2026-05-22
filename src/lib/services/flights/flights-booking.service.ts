@@ -1,7 +1,5 @@
 import "server-only";
 
-/** When a booking is persisted and you have a guest email, call `sendEmail({ type: "booking_confirmation", ... })` from `@/lib/email` (or `POST /api/email/send` with `EMAIL_SERVER_SECRET`) to notify the traveler. */
-
 import { randomBytes } from "crypto";
 import type { FlightPaymentIntentRecord } from "@/generated/prisma";
 import { Prisma } from "@/generated/prisma";
@@ -20,7 +18,7 @@ import {
 } from "@/lib/duffel/order-parse";
 import { createOrder } from "@/lib/duffel/orders";
 import { DuffelApiError } from "@/lib/duffel/errors";
-import { createDuffelPaymentRefund } from "@/lib/duffel/refunds";
+import { runCompensationRefundForPitFailure } from "@/lib/services/flights/flight-refund.service";
 import {
   confirmDuffelPaymentIntent,
   getDuffelPaymentIntent,
@@ -40,7 +38,16 @@ import {
   validateAndPriceOrderServices,
 } from "@/lib/services/flights/flight-ancillaries.service";
 import { refreshFlightOffer } from "@/lib/services/flights/flights-offer.service";
+import { toDuffelOrderPassengers } from "@/lib/flights/duffel-order-passengers";
+import {
+  duffelOrderFailureUserMessage,
+  duffelPassengersMissingContact,
+} from "@/lib/flights/duffel-order-errors";
+import { duffelPassengersMissingInfantLinks } from "@/lib/flights/infant-passenger-linking";
+import type { FlightOfferDTO } from "@/lib/duffel/dto/flight-offer.dto";
 import type { FlightCheckoutBookingBody } from "@/lib/validations/flight-checkout.schema";
+import { assertFlightPassengersReadyForDuffelOrder } from "@/lib/flights/flight-passenger-booking-validation";
+import { loadFlightPassengerValidationContext } from "@/lib/flights/flight-checkout-validation-context";
 import { assertPassengersMatchOffer } from "@/lib/validations/flight-checkout.schema";
 import { hasPermission, type AuthzContext } from "@/lib/authz";
 import { ForbiddenError } from "@/lib/authz/errors";
@@ -125,6 +132,21 @@ function isDuffelAlreadyConfirmedError(e: unknown): boolean {
  * server-side confirm. We delegate to a pure-function core for testability
  * and translate its `FlightCaptureError` into our `AppError` hierarchy.
  */
+/** Best-effort: persist Duffel-reported `fees_amount` / `net_amount` for admin reconciliation. */
+async function syncDuffelReportedPitAmounts(duffelIntentId: string): Promise<void> {
+  try {
+    const remote = await getDuffelPaymentIntent(duffelIntentId);
+    if (remote.fees_amount != null || remote.net_amount != null) {
+      await flightPaymentIntentRepository.updateDuffelReportedAmounts(duffelIntentId, {
+        duffel_reported_fees_amount: remote.fees_amount ?? null,
+        duffel_reported_net_amount: remote.net_amount ?? null,
+      });
+    }
+  } catch {
+    // reconciliation hint only
+  }
+}
+
 async function ensureDuffelPaymentCapturedForInstantBooking(pit: {
   duffel_intent_id: string;
   status: string;
@@ -185,118 +207,50 @@ async function createDuffelOrderWithRetries(
 async function failInstantBookingAfterPaymentCaptured(input: {
   pit: FlightPaymentIntentRecord;
   bookingIdempotencyKey: string | null;
+  /** Present when order failed after capture — used for refund notification email only. */
+  passengers?: FlightCheckoutBookingBody["passengers"];
+  contact?: FlightCheckoutBookingBody["contact"];
+  upstreamMessage?: string;
 }): Promise<never> {
-  const { pit, bookingIdempotencyKey } = input;
+  const { pit, bookingIdempotencyKey, passengers, contact } = input;
   if (pit.order_failure_at) {
     throwTerminalCheckoutReplay(pit);
   }
 
-  let refundId: string | null = null;
-  let refundStatus: string | null = null;
-  let terminalCode: "BOOKING_FAILED_REFUND_PENDING" | "BOOKING_FAILED_REFUNDED" | "BOOKING_FAILED_AFTER_PAYMENT" =
-    "BOOKING_FAILED_AFTER_PAYMENT";
-
-  try {
-    const refund = await createDuffelPaymentRefund({
-      payment_intent_id: pit.duffel_intent_id,
-      amount: pit.charge_amount,
-      currency: pit.charge_currency,
-    });
-    refundId = refund.id;
-    refundStatus = refund.status ?? "pending";
-    const rs = (refundStatus ?? "").toLowerCase();
-    if (rs === "succeeded" || rs === "completed") {
-      terminalCode = "BOOKING_FAILED_REFUNDED";
-    } else {
-      terminalCode = "BOOKING_FAILED_REFUND_PENDING";
-    }
-  } catch {
-    terminalCode = "BOOKING_FAILED_AFTER_PAYMENT";
-    refundId = null;
-    refundStatus = null;
-  }
-
-  await flightPaymentIntentRepository.recordTerminalOrderFailure({
-    duffel_intent_id: pit.duffel_intent_id,
-    order_failure_booking_idempotency_key: bookingIdempotencyKey,
-    order_failure_code: terminalCode,
-    order_failure_refund_id: refundId,
-    order_failure_refund_status: refundStatus,
+  const result = await runCompensationRefundForPitFailure({
+    pit,
+    bookingIdempotencyKey,
+    passengers,
+    contactEmail: contact?.email ?? null,
   });
 
-  await logEvent({
-    type: "order_failed",
-    flight_payment_intent_record_id: pit.id,
-    booking_id: pit.booking_id,
-    amount: pit.charge_amount,
-    currency: pit.charge_currency,
-    payload: {
-      duffel_intent_id: pit.duffel_intent_id,
-      terminal_code: terminalCode,
-    },
-  });
-  if (refundId) {
-    await logEvent({
-      type: "refund_initiated",
-      flight_payment_intent_record_id: pit.id,
-      booking_id: pit.booking_id,
-      amount: pit.charge_amount,
-      currency: pit.charge_currency,
-      payload: {
-        duffel_refund_id: refundId,
-        refund_status: refundStatus,
-        duffel_intent_id: pit.duffel_intent_id,
-      },
-    });
-    if (terminalCode === "BOOKING_FAILED_REFUNDED") {
-      await logEvent({
-        type: "refund_succeeded",
-        flight_payment_intent_record_id: pit.id,
-        booking_id: pit.booking_id,
-        amount: pit.charge_amount,
-        currency: pit.charge_currency,
-        payload: { duffel_refund_id: refundId },
-      });
-    }
-  } else {
-    await logEvent({
-      type: "refund_failed",
-      flight_payment_intent_record_id: pit.id,
-      booking_id: pit.booking_id,
-      amount: pit.charge_amount,
-      currency: pit.charge_currency,
-      payload: { duffel_intent_id: pit.duffel_intent_id },
-    });
-  }
+  const terminalCode = result.terminal_code;
 
   if (terminalCode === "BOOKING_FAILED_REFUNDED") {
-    throw new BookingFailedRefundedError(undefined, pit.duffel_intent_id, refundId);
+    throw new BookingFailedRefundedError(undefined, pit.duffel_intent_id, result.refund_id);
   }
   if (terminalCode === "BOOKING_FAILED_REFUND_PENDING") {
-    throw new BookingFailedRefundPendingError(undefined, pit.duffel_intent_id, refundId, refundStatus);
+    throw new BookingFailedRefundPendingError(
+      undefined,
+      pit.duffel_intent_id,
+      result.refund_id,
+      result.refund_status,
+    );
   }
   throw new BookingFailedAfterPaymentError(
     "Payment was received but the airline could not confirm this booking. Please contact support with your payment reference.",
     pit.duffel_intent_id,
     pit.duffel_intent_id,
+    input.upstreamMessage,
   );
 }
 
-function toDuffelOrderPassengers(passengers: FlightCheckoutBookingBody["passengers"]) {
-  return passengers.map((p) => {
-    const row: Record<string, unknown> = {
-      id: p.passenger_id,
-      title: p.title,
-      given_name: p.given_name,
-      family_name: p.family_name,
-      born_on: p.born_on,
-      gender: p.gender,
-    };
-    if (p.email) row.email = p.email;
-    if (p.phone_number) row.phone_number = p.phone_number;
-    if (p.infant_passenger_id) row.infant_passenger_id = p.infant_passenger_id;
-    return row;
-  });
+function toDuffelOrderPassengersForOffer(
+  passengers: FlightCheckoutBookingBody["passengers"],
+  offer: FlightOfferDTO,
+  contact: FlightCheckoutBookingBody["contact"],
+) {
+  return toDuffelOrderPassengers(passengers, offer, contact);
 }
 
 export async function createDuffelInstantFlightBooking(input: {
@@ -399,8 +353,37 @@ export async function createDuffelInstantFlightBooking(input: {
   }
 
   assertPassengersMatchOffer(offer, input.body.passengers);
+  const validationCtx = await loadFlightPassengerValidationContext(input.body.search_session_id);
+  assertFlightPassengersReadyForDuffelOrder(offer, input.body.passengers, {
+    ...validationCtx,
+    contact: input.body.contact,
+  });
+
+  const duffelPassengers = toDuffelOrderPassengersForOffer(
+    input.body.passengers,
+    offer,
+    input.body.contact,
+  );
+  const missingContact = duffelPassengersMissingContact(duffelPassengers);
+  if (missingContact) {
+    throw new AppError(
+      400,
+      missingContact === "phone"
+        ? "A valid contact phone number is required before booking."
+        : "A valid contact email is required before booking.",
+      "VALIDATION_ERROR",
+    );
+  }
+  if (duffelPassengersMissingInfantLinks(offer, duffelPassengers)) {
+    throw new AppError(
+      400,
+      "Each infant must travel with an accompanying adult before booking.",
+      "VALIDATION_ERROR",
+    );
+  }
 
   const capture = await ensureDuffelPaymentCapturedForInstantBooking(pit);
+  await syncDuffelReportedPitAmounts(pit.duffel_intent_id);
   await logEvent({
     type: "intent_succeeded",
     flight_payment_intent_record_id: pit.id,
@@ -429,7 +412,7 @@ export async function createDuffelInstantFlightBooking(input: {
       },
     ],
     metadata: { payment_intent_id: pit.duffel_intent_id },
-    passengers: toDuffelOrderPassengers(input.body.passengers),
+    passengers: duffelPassengers,
   };
   if (priced.orderServices.length > 0) {
     orderBody.services = priced.orderServices;
@@ -448,22 +431,27 @@ export async function createDuffelInstantFlightBooking(input: {
   try {
     raw = await createDuffelOrderWithRetries(orderBody, input.idempotencyKey);
   } catch (e) {
-    await failInstantBookingAfterPaymentCaptured({
+    const upstreamMessage =
+      e instanceof DuffelApiError ? duffelOrderFailureUserMessage(e) : undefined;
+    return await failInstantBookingAfterPaymentCaptured({
       pit,
       bookingIdempotencyKey: input.idempotencyKey,
+      passengers: input.body.passengers,
+      contact: input.body.contact,
+      upstreamMessage,
     });
-    throw e;
   }
 
   let parsed: ReturnType<typeof parseDuffelOrderResponse>;
   try {
     parsed = parseDuffelOrderResponse(raw);
-  } catch (e) {
-    await failInstantBookingAfterPaymentCaptured({
+  } catch {
+    return await failInstantBookingAfterPaymentCaptured({
       pit,
       bookingIdempotencyKey: input.idempotencyKey,
+      passengers: input.body.passengers,
+      contact: input.body.contact,
     });
-    throw e;
   }
   const expiresAt = offer.expires_at ? new Date(offer.expires_at) : null;
   const ancillaries = parseDuffelOrderServicesForDb(parsed.data);
@@ -471,6 +459,7 @@ export async function createDuffelInstantFlightBooking(input: {
   const guestData = {
     offer_id: offer.id,
     payment_intent_id: pit.duffel_intent_id,
+    contact: input.body.contact,
     passengers: input.body.passengers,
     services: input.body.services,
     customer_charge: { amount: pit.charge_amount, currency: pit.charge_currency },
@@ -501,6 +490,10 @@ export async function createDuffelInstantFlightBooking(input: {
     },
   });
 
+  const duffelBalanceDebit = (
+    Number.parseFloat(pit.offer_amount) + Number.parseFloat(pit.services_subtotal_amount ?? "0")
+  ).toFixed(2);
+
   await logEvent({
     type: "order_placed",
     booking_id: row.id,
@@ -512,6 +505,10 @@ export async function createDuffelInstantFlightBooking(input: {
       duffel_offer_id: offer.id,
       duffel_intent_id: pit.duffel_intent_id,
       booking_reference: parsed.bookingReference,
+      duffel_balance_debit: duffelBalanceDebit,
+      customer_paid: pit.charge_amount,
+      commission: pit.markup_amount,
+      duffel_payment_fee: pit.duffel_payments_fee_amount,
     },
   });
 
@@ -552,11 +549,16 @@ export async function createDuffelHoldFlightBooking(input: {
   }
 
   assertPassengersMatchOffer(offer, input.body.passengers);
+  const validationCtx = await loadFlightPassengerValidationContext(input.body.search_session_id);
+  assertFlightPassengersReadyForDuffelOrder(offer, input.body.passengers, {
+    ...validationCtx,
+    contact: input.body.contact,
+  });
 
   const orderBody: Record<string, unknown> = {
     type: "hold",
     selected_offers: [offer.id],
-    passengers: toDuffelOrderPassengers(input.body.passengers),
+    passengers: toDuffelOrderPassengersForOffer(input.body.passengers, offer, input.body.contact),
   };
   if (priced.orderServices.length > 0) {
     orderBody.services = priced.orderServices;
@@ -567,6 +569,13 @@ export async function createDuffelHoldFlightBooking(input: {
     raw = await createOrder(orderBody, input.idempotencyKey);
   } catch (e) {
     if (e instanceof DuffelApiError) {
+      if (e.hasDuffelErrorCode("unavailable_feature")) {
+        throw new AppError(
+          403,
+          "Hold orders are not available on this Duffel account. Choose Pay now or contact help@duffel.com.",
+          "HOLD_UNAVAILABLE",
+        );
+      }
       throw new AppError(
         502,
         "The airline could not place a hold on this offer. Try again or choose Pay now.",
@@ -583,6 +592,7 @@ export async function createDuffelHoldFlightBooking(input: {
   const guestData = {
     offer_id: offer.id,
     order_mode: "hold",
+    contact: input.body.contact,
     passengers: input.body.passengers,
     services: input.body.services,
   };

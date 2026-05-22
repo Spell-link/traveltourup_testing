@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { EmailBookingSubType, EmailType } from "@/types/email";
-import { triggerTestEmail } from "./actions";
+import { triggerTestEmail, verifySmtp } from "./actions";
 
 const emailTypes = Object.values(EmailType).filter((v) => typeof v === "string") as EmailType[];
 const bookingSubTypes = Object.values(EmailBookingSubType).filter((v) => typeof v === "string") as EmailBookingSubType[];
@@ -12,14 +12,31 @@ export default function EmailTestPage() {
   const [bookingSubType, setBookingSubType] = useState<EmailBookingSubType>(EmailBookingSubType.flight);
   const [to, setTo] = useState("");
   const [loading, setLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [verifyResult, setVerifyResult] = useState<string | null>(null);
+
+  async function onVerifySmtp() {
+    setVerifying(true);
+    setVerifyResult(null);
+    setError(null);
+    setSuccess(null);
+    const result = await verifySmtp();
+    setVerifying(false);
+    if (result.ok) {
+      setVerifyResult("SMTP connection verified successfully.");
+    } else {
+      setVerifyResult(result.error);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setSuccess(null);
     setError(null);
+    setVerifyResult(null);
     const result = await triggerTestEmail({
       emailType,
       bookingSubType: emailType === EmailType.booking ? bookingSubType : null,
@@ -40,10 +57,38 @@ export default function EmailTestPage() {
         Sends via the same pipeline as <code className="rounded bg-slate-100 px-1">POST /api/email/send</code>. In{" "}
         <code className="rounded bg-slate-100 px-1">npm run dev</code>,{" "}
         <code className="rounded bg-slate-100 px-1">EMAIL_SERVER_SECRET</code> is optional (in-process send). For real
-        delivery set <code className="rounded bg-slate-100 px-1">RESEND_API_KEY</code> and{" "}
-        <code className="rounded bg-slate-100 px-1">EMAIL_FROM</code>; use a secret + Bearer when testing the HTTP route
-        (e.g. production).
+        delivery set <code className="rounded bg-slate-100 px-1">SMTP_HOST</code>,{" "}
+        <code className="rounded bg-slate-100 px-1">SMTP_USER</code>,{" "}
+        <code className="rounded bg-slate-100 px-1">SMTP_PASS</code>, and{" "}
+        <code className="rounded bg-slate-100 px-1">EMAIL_FROM</code>. Use{" "}
+        <code className="rounded bg-slate-100 px-1">SMTP_HOST=smtp.hostinger.com</code> and{" "}
+        <code className="rounded bg-slate-100 px-1">SMTP_PORT=465</code> for Hostinger mail. Enable{" "}
+        <strong>Third-party app access</strong> in webmail if auth fails. Use a secret + Bearer when testing the HTTP
+        route (e.g. production).
       </p>
+
+      <div className="mt-6">
+        <button
+          type="button"
+          onClick={onVerifySmtp}
+          disabled={verifying || loading}
+          className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+        >
+          {verifying ? "Verifying…" : "Verify SMTP connection"}
+        </button>
+      </div>
+
+      {verifyResult ? (
+        <p
+          className={`mt-4 rounded-md border px-3 py-2 text-sm whitespace-pre-wrap ${
+            verifyResult.includes("failed") || verifyResult.includes("rejected")
+              ? "border-red-200 bg-red-50 text-red-900"
+              : "border-emerald-200 bg-emerald-50 text-emerald-900"
+          }`}
+        >
+          {verifyResult}
+        </p>
+      ) : null}
 
       <form onSubmit={onSubmit} className="mt-8 space-y-4">
         <div>
@@ -90,8 +135,8 @@ export default function EmailTestPage() {
           </label>
           <p className="mt-0.5 text-xs text-slate-500">
             This address is sent as the email <strong>To</strong> field. The sender (<strong>From</strong>) comes from{" "}
-            <code className="rounded bg-slate-100 px-1">EMAIL_FROM</code> in <code className="rounded bg-slate-100 px-1">.env.local</code>{" "}
-            (Gmail addresses use Reply-To with Resend).
+            <code className="rounded bg-slate-100 px-1">EMAIL_FROM</code> in{" "}
+            <code className="rounded bg-slate-100 px-1">.env.local</code>.
           </p>
           <input
             id="to"
@@ -107,7 +152,7 @@ export default function EmailTestPage() {
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || verifying}
           className="w-full rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-sky-700 disabled:opacity-60"
         >
           {loading ? "Sending…" : "Send test email"}

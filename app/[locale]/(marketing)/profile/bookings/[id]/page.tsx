@@ -27,12 +27,10 @@ export default async function ProfileBookingDetailPage({ params }: { params: Pro
   }
 
   return (
-    <main className="bg-muted/40 py-8 md:py-12">
-      <div className="container mx-auto max-w-3xl px-4">
-        <div className="mt-6 rounded-2xl border border-border bg-card p-6 shadow-sm md:p-8">
+
+      <div className="container mx-auto bg-muted py-4 px-2 sm:p-6 md:p-8">
           <BookingDetailView bookingId={id} />
-        </div>
       </div>
-    </main>
+
   );
 }

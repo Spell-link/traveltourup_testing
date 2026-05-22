@@ -21,6 +21,9 @@ export async function GET(req: NextRequest) {
       type: qp(searchParams.get("type")),
       page: qp(searchParams.get("page")),
       limit: qp(searchParams.get("limit")),
+      q: qp(searchParams.get("q")),
+      sort: qp(searchParams.get("sort")),
+      order: qp(searchParams.get("order")),
     });
 
     const result = await listBookings({

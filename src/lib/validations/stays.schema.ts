@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { e164PhoneSchema } from "@/lib/validations/phone.schema";
 
 /**
  * Stays request bodies aligned with Duffel Stays APIs.
@@ -45,7 +46,7 @@ export const staysBookingBodySchema = z.object({
     three_d_secure_session_id: z.string().min(1),
   }),
   email: z.string().email(),
-  phone_number: z.string().min(1).max(32),
+  phone_number: e164PhoneSchema,
   guests: z.array(staysGuestBookingSchema).min(1),
   accommodation_special_requests: z.string().max(500).optional(),
 });

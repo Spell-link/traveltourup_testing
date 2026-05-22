@@ -43,6 +43,7 @@ export const ROUTE_PATH_TO_SEO_KEY: Record<string, string> = {
   "/profile": "profile",
   "/profile/bookings": "profile_bookings",
   "/profile/bookings/detail": "profile_booking_detail",
+  "/profile/flight-activity": "profile_flight_activity",
 };
 
 /**
@@ -557,6 +558,38 @@ export const ROUTE_METADATA: Record<string, RouteMetadata> = {
       description: "Secure payment processing for your flight.",
     },
   },
+  "/flights/change": {
+    title: "Change flight",
+    description: "Change your confirmed flight booking.",
+    openGraph: {
+      title: `Change flight — ${SITE_NAME}`,
+      description: "Select new dates or routes for your booking.",
+    },
+  },
+  "/flights/change/offers": {
+    title: "Available flight changes",
+    description: "Review airline change options for your booking.",
+    openGraph: {
+      title: `Flight change options — ${SITE_NAME}`,
+      description: "Compare change offers from the airline.",
+    },
+  },
+  "/flights/change/detail": {
+    title: "Review flight change",
+    description: "Review your selected flight change before payment.",
+    openGraph: {
+      title: `Review flight change — ${SITE_NAME}`,
+      description: "Confirm itinerary and price difference for your booking change.",
+    },
+  },
+  "/flights/change/payment": {
+    title: "Confirm flight change",
+    description: "Review and pay for your flight change.",
+    openGraph: {
+      title: `Confirm flight change — ${SITE_NAME}`,
+      description: "Complete your flight change payment.",
+    },
+  },
   "/privacy": {
     title: "Privacy Policy",
     description: "Our privacy policy and data practices.",
@@ -613,6 +646,14 @@ export const ROUTE_METADATA: Record<string, RouteMetadata> = {
     openGraph: {
       title: `Booking details — ${SITE_NAME}`,
       description: "Confirmation and references for your trip.",
+    },
+  },
+  "/profile/flight-activity": {
+    title: "Flight payments & refunds",
+    description: "Review charges and refunds for your flight bookings on TravelTourUp.",
+    openGraph: {
+      title: `Flight payments — ${SITE_NAME}`,
+      description: "Debit and credit history for your flights.",
     },
   },
 };

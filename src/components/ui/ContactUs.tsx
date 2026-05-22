@@ -165,7 +165,7 @@ export default function ContactUs() {
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                     <Phone className="h-4 w-4" />
                   </div>
-                  <a href="tel:+92 (321)-9400142" className="text-start underline decoration-primary/40 underline-offset-4 transition-colors hover:text-primary" >+92 (321)-9400142</a>
+                  <a href="tel:+1 800 443 0456" className="text-start underline decoration-primary/40 underline-offset-4 transition-colors hover:text-primary" >+1 800 443 0456</a>
                 </div>
 
                 <div className="flex items-center gap-3">

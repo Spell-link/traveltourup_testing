@@ -4,8 +4,9 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import FlightDetail from "@/views/FlightDetail";
-import { FlightDetailLoading } from "@/components/flights/FlightDetailSkeleton";
-import { getFlightOffer } from "@/lib/http/flights.client";
+import { FlightDetailLoading } from "@/components/flights/FlightSkeletons";
+import { getFlightOfferDeduped } from "@/lib/http/flights.client";
+import { writeFlightOfferSnapshot } from "@/lib/flights/flight-offer-snapshot";
 import { flightOfferToListDisplay } from "@/lib/flights/list-display";
 import type { FlightListDisplay } from "@/lib/flights/list-display";
 import type { FlightOfferDTO } from "@/lib/duffel/dto/flight-offer.dto";
@@ -34,11 +35,12 @@ export default function FlightDetailPageClient() {
     setFlight(null);
     setOfferDto(null);
     setLoading(true);
-    getFlightOffer(id)
+    getFlightOfferDeduped(id)
       .then((res) => {
         if (cancelled) return;
         setFlight(flightOfferToListDisplay(res.offer));
         setOfferDto(res.offer);
+        writeFlightOfferSnapshot(res.offer);
       })
       .catch((e: Error) => {
         if (!cancelled) setError(e?.message ?? "Could not load this offer");

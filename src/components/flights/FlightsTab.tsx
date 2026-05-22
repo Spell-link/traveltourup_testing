@@ -1,10 +1,21 @@
 // @ts-nocheck - Phase 1: Complex component; full typing in Phase 3
 "use client";
-import React, { useState, useRef, useEffect, useMemo, useLayoutEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo, useLayoutEffect, useCallback } from "react";
 import { Link } from "@/i18n/navigation";
 import { useRouter, useSearchParams } from "next/navigation";
 import { hydrateFlightsFormFromUrl } from "@/lib/flights/hydrate-flights-form-from-url";
-import { cabinClassToDuffel } from "@/lib/validations/flights.schema";
+import { persistFlightSearchPath } from "@/lib/flights/flight-search-url-session";
+import {
+  flightChangeSearchParamsFromHydrated,
+  hydrateFlightsFormFromChangeUrl,
+} from "@/lib/flights/hydrate-flights-form-from-change-url";
+import { buildFlightChangeSearchUrl } from "@/lib/flights/flights-change-page-layout";
+import { isChangeFlow, type FlowVariant, type OriginalBookingContext } from "@/lib/flights/flow-variant";
+import { selectedSliceOption } from "@/lib/flights/build-original-booking-context";
+import { writeFlightChangeSession, sortChangeOffersByCost } from "@/lib/flights/flight-change-session";
+import { ApiRequestError } from "@/lib/http/api-client";
+import { postFlightOrderChangeQuote } from "@/lib/http/flights.client";
+import { cabinClassToDuffel, duffelCabinToUi } from "@/lib/validations/flights.schema";
 import { ChevronDown, Calendar, ChevronLeft, ChevronRight, Users, Search, ArrowLeftRight, X, Plus, SlidersHorizontal } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { AIRPORTS } from "@/data/airports";
@@ -22,7 +33,10 @@ import {
   type FlightSliceTimePopoverTriggerHandle,
 } from "@/components/flights/FlightSliceTimePopoverTrigger";
 import { PreferredAirlinesCombobox } from "@/components/flights/PreferredAirlinesCombobox";
-import { Skeleton } from "@/components/admin_ui/ui/skeleton";
+import { FlightSliceTimePopover } from "@/components/flights/FlightSliceTimePopover";
+import { FlightAirportSuggestSkeleton } from "@/components/flights/FlightSkeletons";
+import { MobileFullscreenSearchOverlay } from "@/components/shared/mobile/MobileFullscreenSearchOverlay";
+import { useMobileFullscreenInteraction } from "@/hooks/useMobileFullscreenInteraction";
 import { cn } from "@/lib/utils";
 
 const COMBO_TRIGGER_CLASS = `${COMBO_FIELD_SHELL_CLASS} cursor-pointer flex justify-between items-center font-medium `;
@@ -63,6 +77,9 @@ function FlightsTab({
   showTravelerDropdown: externalShowTravelerDropdown,
   setShowTravelerDropdown: externalSetShowTravelerDropdown,
   variant = "page",
+  flowVariant = "new-booking",
+  originalBooking,
+  onChangeSearchComplete,
   /** Close host chrome (edit-search dialog + mobile filters) before navigation on results page. */
   onFlightSearchStart,
 }: {
@@ -76,6 +93,9 @@ function FlightsTab({
   setShowTravelerDropdown?: (v: boolean) => void;
   /** `modal`: edit-search dialog; lg+ uses dedicated 12-column rows (see `MODAL_LG_GRID`). */
   variant?: "page" | "modal";
+  flowVariant?: FlowVariant;
+  originalBooking?: OriginalBookingContext;
+  onChangeSearchComplete?: (result: { changeId: string; offers: import("@/lib/http/flights.client").FlightOrderChangeOffer[] }) => void;
   onFlightSearchStart?: () => void;
 } = {}) {
   // Internal state for when props aren't provided
@@ -99,11 +119,16 @@ function FlightsTab({
   const setShowTravelerDropdown = externalSetShowTravelerDropdown !== undefined ? externalSetShowTravelerDropdown : setInternalShowTravelerDropdown;
 
   const isModal = variant === "modal";
+  const isChange = isChangeFlow(flowVariant);
+  const [changeSearchBusy, setChangeSearchBusy] = useState(false);
+  const [changeSearchError, setChangeSearchError] = useState<string | null>(null);
+  const changePrefilledRef = useRef(false);
 
   const router = useRouter();
   const searchParams = useSearchParams();
   const flightSearchQueryKey = searchParams.toString();
   const ft = useTranslations("Flights.tab");
+  const tCommon = useTranslations("Common");
   const locale = useLocale();
 
   const calendarWeekdays = useMemo(
@@ -188,6 +213,109 @@ function FlightsTab({
     toSearch,
   );
 
+  const {
+    isMobile,
+    activeField,
+    openField,
+    closeField,
+    showInlinePanel,
+  } = useMobileFullscreenInteraction();
+
+  const parseMobileFieldKey = useCallback((key: string | null) => {
+    if (!key) return null;
+    const colon = key.indexOf(":");
+    if (colon === -1) return { type: key, flightId: null as number | null };
+    return {
+      type: key.slice(0, colon),
+      flightId: Number(key.slice(colon + 1)) || null,
+    };
+  }, []);
+
+  const closeAllPanels = useCallback(() => {
+    setShowDepartDatePicker(false);
+    setShowReturnDatePicker(false);
+    setShowTravelerDropdown(false);
+    setShowFromDropdown(false);
+    setShowToDropdown(false);
+    setFromSearch("");
+    setToSearch("");
+    setFromHighlightIndex(-1);
+    setToHighlightIndex(-1);
+    setShowAdvanced(false);
+    departTimeTriggerRef.current?.close();
+    returnTimeTriggerRef.current?.close();
+    closeField();
+  }, [closeField]);
+
+  const airportFieldKey = useCallback((type: "from" | "to", flightId: number | null) => {
+    return flightId != null ? `${type}:${flightId}` : type;
+  }, []);
+
+  const dateFieldKey = useCallback((isReturn: boolean, flightId: number | null) => {
+    if (flightId != null) return `depart:${flightId}`;
+    return isReturn ? "return" : "depart";
+  }, []);
+
+  const openAirportField = useCallback(
+    (type: "from" | "to", flightId: number | null) => {
+      const key = airportFieldKey(type, flightId);
+      if (isMobile) {
+        openField(key);
+        if (type === "from") {
+          setShowFromDropdown(true);
+          setFromSearch("");
+        } else {
+          setShowToDropdown(true);
+          setToSearch("");
+        }
+      } else if (type === "from") {
+        setShowFromDropdown(true);
+        setFromSearch("");
+      } else {
+        setShowToDropdown(true);
+        setToSearch("");
+      }
+    },
+    [airportFieldKey, isMobile, openField],
+  );
+
+  const openDateField = useCallback(
+    (isReturn: boolean, flightId: number | null) => {
+      if (isReturn) returnTimeTriggerRef.current?.close();
+      else departTimeTriggerRef.current?.close();
+      const key = dateFieldKey(isReturn, flightId);
+      if (isMobile) {
+        openField(key);
+        if (isReturn) setShowReturnDatePicker(true);
+        else setShowDepartDatePicker(true);
+      } else if (isReturn) {
+        setShowReturnDatePicker((v) => !v);
+      } else {
+        setShowDepartDatePicker((v) => !v);
+      }
+    },
+    [dateFieldKey, isMobile, openField],
+  );
+
+  const openTravelersField = useCallback(() => {
+    if (isChange) return;
+    if (isMobile) {
+      openField("travelers");
+      setShowTravelerDropdown(true);
+    } else {
+      setShowTravelerDropdown((v) => !v);
+    }
+  }, [isChange, isMobile, openField]);
+
+  const openAdvancedField = useCallback(() => {
+    if (isMobile) {
+      openField("advanced");
+      setShowAdvanced(true);
+    } else {
+      setShowAdvanced((v) => !v);
+    }
+  }, [isMobile, openField]);
+
   const fromListItems = useMemo(() => {
     const needle = fromSearch.trim();
     if (needle.length < 2) {
@@ -222,6 +350,24 @@ function FlightsTab({
   }, [travelers.children]);
 
   useLayoutEffect(() => {
+    if (!isChange) return;
+    const h = hydrateFlightsFormFromChangeUrl(new URLSearchParams(searchParams.toString()));
+    if (!h) return;
+    setTripType("one-way");
+    setCabinClass(h.cabinClass);
+    setTravelers(h.travelers);
+    setChildAges(h.childAges.length > 0 ? h.childAges : []);
+    setSelectedFromAirport(h.selectedFromAirport);
+    setSelectedToAirport(h.selectedToAirport);
+    setDepartDate(h.departDate);
+    setReturnDate("");
+    setCurrentMonth(h.currentMonth);
+    setCurrentYear(h.currentYear);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- change URL sync
+  }, [flightSearchQueryKey, isChange]);
+
+  useLayoutEffect(() => {
+    if (isChange) return;
     const h = hydrateFlightsFormFromUrl(new URLSearchParams(searchParams.toString()));
     if (!h) return;
     setTripType(h.tripType);
@@ -249,7 +395,52 @@ function FlightsTab({
     setReturnCurrentMonth(h.returnCurrentMonth);
     setReturnCurrentYear(h.returnCurrentYear);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync form to URL only when the query string identity changes
-  }, [flightSearchQueryKey]);
+  }, [flightSearchQueryKey, isChange]);
+
+  useLayoutEffect(() => {
+    if (!isChange || !originalBooking || changePrefilledRef.current) return;
+    changePrefilledRef.current = true;
+    const slice = selectedSliceOption(originalBooking);
+    if (!slice) return;
+    setTripType("one-way");
+    const fromCode = slice.origin_iata;
+    const toCode = slice.destination_iata;
+    const fromAp = AIRPORTS.find((a) => a.code === fromCode) ?? {
+      code: fromCode,
+      name: fromCode,
+      city: "",
+      country: "",
+    };
+    const toAp = AIRPORTS.find((a) => a.code === toCode) ?? {
+      code: toCode,
+      name: toCode,
+      city: "",
+      country: "",
+    };
+    setSelectedFromAirport(fromAp);
+    setSelectedToAirport(toAp);
+    if (slice.departure_date) setDepartDate(slice.departure_date);
+    if (slice.cabin_class) setCabinClass(duffelCabinToUi(slice.cabin_class));
+    const pax = originalBooking.flight
+      ? { adults: 1, children: 0, infants: 0 }
+      : { adults: 1, children: 0, infants: 0 };
+    const snap = originalBooking.itinerarySnapshot;
+    if (snap && typeof snap === "object" && Array.isArray((snap as { passengers?: unknown }).passengers)) {
+      const paxList = (snap as { passengers: { type?: string }[] }).passengers;
+      let adults = 0;
+      let children = 0;
+      let infants = 0;
+      for (const p of paxList) {
+        const t = (p.type ?? "adult").toLowerCase();
+        if (t === "child") children += 1;
+        else if (t === "infant_without_seat" || t === "infant") infants += 1;
+        else adults += 1;
+      }
+      setTravelers({ adults: Math.max(1, adults), children, infants });
+    } else {
+      setTravelers(pax);
+    }
+  }, [isChange, originalBooking]);
 
   const appendSliceTimes = (p, idx, depFrom, depTo, arrFrom, arrTo) => {
     if (depFrom) p.set(`s${idx}_dep_from`, depFrom);
@@ -314,15 +505,92 @@ function FlightsTab({
     return `/flights?${p.toString()}`;
   };
 
+  const onChangeSearchNavigate = async () => {
+    if (!originalBooking) return;
+    const sliceId = originalBooking.selectedSliceId;
+    const cabinMap: Record<string, string> = {
+      economy: "economy",
+      "premium-economy": "premium_economy",
+      business: "business",
+      first: "first",
+    };
+    const urlParams = flightChangeSearchParamsFromHydrated({
+      sliceId,
+      selectedFromAirport,
+      selectedToAirport,
+      departDate,
+      cabinClass,
+      travelers,
+    });
+    if (!urlParams) return;
+
+    setChangeSearchBusy(true);
+    setChangeSearchError(null);
+    try {
+      const result = await postFlightOrderChangeQuote(originalBooking.bookingId, {
+        selected_slice_id: sliceId,
+        departure_date: urlParams.departure_date,
+        origin: urlParams.origin,
+        destination: urlParams.destination,
+        cabin_class: cabinMap[cabinClass] as "economy" | "premium_economy" | "business" | "first",
+      });
+      const sorted = sortChangeOffersByCost(result.offers);
+      const paxTotal = travelers.adults + travelers.children + travelers.infants;
+      writeFlightChangeSession(originalBooking.bookingId, {
+        selectedSliceId: sliceId,
+        origin: urlParams.origin,
+        destination: urlParams.destination,
+        departureDate: urlParams.departure_date,
+        cabinClass: urlParams.cabin_class,
+        changeId: result.id,
+        offers: sorted,
+        quoteExpiresAt: result.quote_expires_at,
+        bookingRefNo: originalBooking.bookingRefNo,
+        beforeChangeAmount: String(originalBooking.totalAmount),
+        beforeChangeCurrency: originalBooking.currency,
+        selectedSliceIndex: originalBooking.selectedSliceIndex,
+        searchSummary: {
+          route: `${urlParams.origin} → ${urlParams.destination}`,
+          dateLabel: urlParams.departure_date,
+          passengerCount: paxTotal,
+        },
+      });
+      onChangeSearchComplete?.({ changeId: result.id, offers: sorted });
+      onFlightSearchStart?.();
+      router.push(
+        buildFlightChangeSearchUrl(originalBooking.bookingId, urlParams, {
+          changeId: result.id,
+        }),
+      );
+    } catch (e) {
+      setChangeSearchError(
+        e instanceof ApiRequestError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : "Could not search for changes.",
+      );
+    } finally {
+      setChangeSearchBusy(false);
+    }
+  };
+
   const onSearchNavigate = () => {
+    if (isChange) {
+      void onChangeSearchNavigate();
+      return;
+    }
     const href = buildFlightsSearchUrl();
     if (!href) return;
+    persistFlightSearchPath(href);
     onFlightSearchStart?.();
     router.push(href);
   };
 
-  // Close dropdowns when clicking outside
+  // Close dropdowns when clicking outside (desktop inline panels only)
   useEffect(() => {
+    if (isMobile) return;
+
     const handleClickOutside = (event) => {
       if (
         departDatePickerRef.current &&
@@ -370,27 +638,30 @@ function FlightsTab({
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, []);
+  }, [isMobile]);
 
   // Close all dropdowns on Escape key (Phase 5 - Accessibility)
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setShowDepartDatePicker(false);
-        setShowReturnDatePicker(false);
-        setShowTravelerDropdown(false);
-        setShowFromDropdown(false);
-        setShowToDropdown(false);
-        setFromSearch("");
-        setToSearch("");
-        setFromHighlightIndex(-1);
-        setToHighlightIndex(-1);
-        setShowAdvanced(false);
+      if (e.key !== "Escape") return;
+      if (isMobile && activeField) {
+        closeAllPanels();
+        return;
       }
+      setShowDepartDatePicker(false);
+      setShowReturnDatePicker(false);
+      setShowTravelerDropdown(false);
+      setShowFromDropdown(false);
+      setShowToDropdown(false);
+      setFromSearch("");
+      setToSearch("");
+      setFromHighlightIndex(-1);
+      setToHighlightIndex(-1);
+      setShowAdvanced(false);
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, []);
+  }, [activeField, closeAllPanels, isMobile]);
 
   // Focus search input when dropdown opens
   useEffect(() => {
@@ -500,8 +771,7 @@ function FlightsTab({
     } else {
       setSelectedFromAirport(airport);
     }
-    setShowFromDropdown(false);
-    setFromSearch("");
+    closeAllPanels();
   };
 
   const handleToAirportSelect = (airport, flightId = null) => {
@@ -510,8 +780,7 @@ function FlightsTab({
     } else {
       setSelectedToAirport(airport);
     }
-    setShowToDropdown(false);
-    setToSearch("");
+    closeAllPanels();
   };
 
   function selectAirportListItem(which, index, flightId) {
@@ -606,21 +875,21 @@ function FlightsTab({
     const formattedDate = toLocalYmd(selectedDate);
     setDepartDate(formattedDate);
     setReturnDate((prev) => (prev && prev < formattedDate ? formattedDate : prev));
-    setShowDepartDatePicker(false);
+    closeAllPanels();
   };
 
   const handleReturnDateSelect = (day, month, year) => {
     const selectedDate = new Date(year, month, day);
     const formattedDate = toLocalYmd(selectedDate);
     setReturnDate(formattedDate);
-    setShowReturnDatePicker(false);
+    closeAllPanels();
   };
 
   const handleFlightDateSelect = (flightId, day, month, year) => {
     const selectedDate = new Date(year, month, day);
     const formattedDate = toLocalYmd(selectedDate);
     updateFlight(flightId, "date", formattedDate);
-    setShowDepartDatePicker(false);
+    closeAllPanels();
   };
 
   const nextMonth = (isReturn = false) => {
@@ -734,6 +1003,471 @@ function FlightsTab({
     return days;
   };
 
+  const renderAirportPanelBody = (isFrom: boolean, flightId: number | null) => {
+    const search = isFrom ? fromSearch : toSearch;
+    const listItems = isFrom ? fromListItems : toListItems;
+    const loading = isFrom ? fromAirportLoading : toAirportLoading;
+    const highlightIndex = isFrom ? fromHighlightIndex : toHighlightIndex;
+    const setHighlightIndex = isFrom ? setFromHighlightIndex : setToHighlightIndex;
+
+    return (
+      <>
+        {search.trim().length < 2 ? (
+          <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
+            {ft("popularAirportsHint")}
+          </div>
+        ) : null}
+        <div
+          className="py-1"
+          role="listbox"
+          aria-label={isFrom ? ft("ariaOriginAirports") : ft("ariaDestinationAirports")}
+        >
+          {loading && search.trim().length >= 2 ? (
+            <FlightAirportSuggestSkeleton rows={6} />
+          ) : search.trim().length >= 2 && listItems.length === 0 ? (
+            <div className="px-4 py-3 text-sm text-muted-foreground">{ft("noMatchingAirports")}</div>
+          ) : (
+            listItems.map((item, index) => {
+              if (item.kind === "popular") {
+                const airport = item.a;
+                return (
+                  <div
+                    key={`popular-${airport.code}-${index}`}
+                    role="option"
+                    aria-selected={highlightIndex === index}
+                    className={cn(
+                      "px-4 py-3 hover:bg-primary/10 cursor-pointer border-b border-border last:border-b-0",
+                      highlightIndex === index && "bg-primary/10 ring-1 ring-inset ring-primary/20",
+                    )}
+                    onMouseEnter={() => setHighlightIndex(index)}
+                    onClick={() => selectAirportListItem(isFrom ? "from" : "to", index, flightId)}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="font-semibold text-foreground">{airport.city}</div>
+                        <div className="text-xs text-muted-foreground">{airport.name}</div>
+                      </div>
+                      <div className="text-sm font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
+                        {airport.code}
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">{airport.country}</div>
+                  </div>
+                );
+              }
+              const dto = item.dto;
+              return (
+                <div
+                  key={`api-${dto.iata_code}-${index}`}
+                  role="option"
+                  aria-selected={highlightIndex === index}
+                  className={cn(
+                    "px-4 py-3 hover:bg-primary/10 cursor-pointer border-b border-border last:border-b-0",
+                    highlightIndex === index && "bg-primary/10 ring-1 ring-inset ring-primary/20",
+                  )}
+                  onMouseEnter={() => setHighlightIndex(index)}
+                  onClick={() => selectAirportListItem(isFrom ? "from" : "to", index, flightId)}
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-semibold text-foreground">{dto.city_name || ""}</div>
+                      <div className="text-xs text-muted-foreground">{dto.name}</div>
+                    </div>
+                    <div className="text-sm font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
+                      {dto.iata_code}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </>
+    );
+  };
+
+  const renderAirportSearchInput = (isFrom: boolean, flightId: number | null) => {
+    const search = isFrom ? fromSearch : toSearch;
+    const setSearch = isFrom ? setFromSearch : setToSearch;
+    const searchInputRef = isFrom ? fromSearchInputRef : toSearchInputRef;
+
+    return (
+      <div className={COMBO_FIELD_SHELL_CLASS}>
+        <input
+          ref={searchInputRef}
+          type="text"
+          placeholder={ft("filterPlaceholder")}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => handleAirportSearchKeyDown(isFrom, e, flightId)}
+          className="w-full h-full bg-transparent border-none outline-none text-foreground font-medium placeholder-muted-foreground"
+          autoFocus
+        />
+      </div>
+    );
+  };
+
+  const renderCalendarPanelContent = (isReturn: boolean, flightId: number | null) => (
+    <>
+      <div className="mb-4 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => prevMonth(isReturn)}
+          className="rounded-full p-2 transition-colors hover:bg-muted"
+        >
+          <ChevronLeft className="h-4 w-4 text-muted-foreground" strokeWidth={2} />
+        </button>
+        <h3 className="text-sm font-semibold text-foreground">
+          {formatMonthYear(
+            new Date(
+              isReturn ? returnCurrentYear : currentYear,
+              isReturn ? returnCurrentMonth : currentMonth,
+            ),
+          )}
+        </h3>
+        <button
+          type="button"
+          onClick={() => nextMonth(isReturn)}
+          className="rounded-full p-2 transition-colors hover:bg-muted"
+        >
+          <ChevronRight className="h-4 w-4 text-muted-foreground" strokeWidth={2} />
+        </button>
+      </div>
+      <div className="mb-2 grid grid-cols-7 gap-1">
+        {calendarWeekdays.map((day) => (
+          <div
+            key={day}
+            className="flex h-8 w-8 items-center justify-center text-xs font-medium text-muted-foreground"
+          >
+            {day}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">{renderCalendar(isReturn, flightId)}</div>
+    </>
+  );
+
+  const renderTravelerPanelBody = () => (
+    <>
+      <div className="flex justify-between items-center mb-4">
+        <span className="text-sm font-bold text-muted-foreground">{ft("adultsLabel")}</span>
+        <div className="flex items-center gap-3">
+          {!isChange ? (
+            <>
+              <button
+                type="button"
+                onClick={() => updateTravelers("adults", "decrement")}
+                className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={travelers.adults <= 1}
+              >
+                -
+              </button>
+            </>
+          ) : null}
+          <span className="text-sm font-bold w-6 text-center text-muted-foreground">{travelers.adults}</span>
+          {!isChange ? (
+            <button
+              type="button"
+              onClick={() => updateTravelers("adults", "increment")}
+              className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold"
+            >
+              +
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center mb-4">
+        <span className="text-sm font-bold text-muted-foreground">{ft("childrenLabel")}</span>
+        <div className="flex items-center gap-3">
+          {!isChange ? (
+            <button
+              type="button"
+              onClick={() => updateTravelers("children", "decrement")}
+              className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={travelers.children <= 0}
+            >
+              -
+            </button>
+          ) : null}
+          <span className="text-sm font-bold w-6 text-center text-muted-foreground">{travelers.children}</span>
+          {!isChange ? (
+            <button
+              type="button"
+              onClick={() => updateTravelers("children", "increment")}
+              className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold"
+            >
+              +
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center mb-4">
+        <span className="text-sm font-bold text-muted-foreground">{ft("infantsLabel")}</span>
+        <div className="flex items-center gap-3">
+          {!isChange ? (
+            <button
+              type="button"
+              onClick={() => updateTravelers("infants", "decrement")}
+              className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={travelers.infants <= 0}
+            >
+              -
+            </button>
+          ) : null}
+          <span className="text-sm font-bold w-6 text-center text-muted-foreground">{travelers.infants}</span>
+          {!isChange ? (
+            <button
+              type="button"
+              onClick={() => updateTravelers("infants", "increment")}
+              className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold"
+            >
+              +
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {travelers.children > 0 ? (
+        <div className="border-t border-border pt-3 mt-2 space-y-2">
+          <p className="text-xs text-muted-foreground">{ft("childAgeHint")}</p>
+          {childAges.slice(0, travelers.children).map((age, idx) => (
+            <div key={idx} className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-foreground">{ft("childLabel", { n: idx + 1 })}</span>
+              <select
+                className="rounded-lg border border-input bg-background px-2 py-1 text-sm"
+                value={age}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setChildAges((prev) => {
+                    const next = [...prev];
+                    next[idx] = v;
+                    return next;
+                  });
+                }}
+              >
+                {Array.from({ length: 16 }, (_, i) => i + 2).map((a) => (
+                  <option key={a} value={a}>
+                    {ft("yearsOld", { years: a })}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+
+  const renderAdvancedPanelBody = () => (
+    <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="md:col-span-3">
+        <label className="text-xs font-bold text-foreground">{ft("classLabel")}</label>
+        <div className="relative mt-1">
+          <select
+            value={cabinClass}
+            onChange={(e) => setCabinClass(e.target.value)}
+            className={`w-full ${INPUT_FIELD_CLASS} h-12 appearance-none py-2.5 font-medium text-muted-foreground`}
+          >
+            <option value="economy">{ft("cabinEconomy")}</option>
+            <option value="premium-economy">{ft("cabinPremiumEconomy")}</option>
+            <option value="business">{ft("cabinBusiness")}</option>
+            <option value="first-class">{ft("cabinFirstClass")}</option>
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={2}
+          />
+        </div>
+      </div>
+      <div className="md:col-span-3">
+        <label className="text-xs font-bold text-muted-foreground">{ft("maxConnectionsLabel")}</label>
+        <div className="relative mt-1">
+          <Select
+            value={advMaxConnections === "" ? "any" : advMaxConnections}
+            onValueChange={(v) => setAdvMaxConnections(v === "any" ? "" : v)}
+          >
+            <SelectTrigger className={`${INPUT_FIELD_CLASS} h-12 py-2.5 font-medium text-muted-foreground`}>
+              <SelectValue placeholder={ft("maxConnectionsAny")} />
+            </SelectTrigger>
+            <SelectContent className="z-[250]">
+              <SelectItem value="any">{ft("maxConnectionsAny")}</SelectItem>
+              <SelectItem value="0">{ft("maxConnectionsDirect")}</SelectItem>
+              <SelectItem value="1">{ft("maxConnectionsOne")}</SelectItem>
+              <SelectItem value="2">{ft("maxConnectionsTwo")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="md:col-span-3">
+        <label className="text-xs font-bold text-muted-foreground">{ft("supplierTimeoutLabel")}</label>
+        <input
+          type="number"
+          min={5000}
+          max={120000}
+          step={1000}
+          value={advSupplierTimeout}
+          onChange={(e) => setAdvSupplierTimeout(parseInt(e.target.value, 10) || 60000)}
+          className={INPUT_FIELD_CLASS}
+        />
+        <p className="mt-1 text-[11px] text-muted-foreground">{ft("supplierTimeoutHint")}</p>
+      </div>
+      <div className="md:col-span-3">
+        <div className="flex flex-col items-start justify-center">
+          <label className="text-xs font-bold text-foreground">{ft("preferredAirlinesLabel")}</label>
+          <p className="mb-1 text-[11px] text-muted-foreground">{ft("preferredAirlinesHint")}</p>
+        </div>
+      </div>
+      <div className="md:col-span-3">
+        <PreferredAirlinesCombobox selected={preferredCarrierIatas} onChange={setPreferredCarrierIatas} />
+      </div>
+    </div>
+  );
+
+  const getSliceTimeButtonSummary = (slot: {
+    takeoffFrom: string;
+    takeoffTo: string;
+    landingFrom: string;
+    landingTo: string;
+  }) => {
+    const { takeoffFrom: df, takeoffTo: dt, landingFrom: af, landingTo: at } = slot;
+    const empty = (s: string) => !s?.trim();
+    if (empty(df) && empty(dt) && empty(af) && empty(at)) return ft("flightTimeSummaryAny");
+    const parts: string[] = [];
+    if (df && dt) parts.push(ft("flightTimeSummaryTakeoff", { from: df, to: dt }));
+    if (af && at) parts.push(ft("flightTimeSummaryLanding", { from: af, to: at }));
+    return parts.join(" · ");
+  };
+
+  const getMobileOverlayTitle = (key: string | null) => {
+    const parsed = parseMobileFieldKey(key);
+    if (!parsed) return "";
+    switch (parsed.type) {
+      case "from":
+        return ft("flyingFromLabel");
+      case "to":
+        return ft("destinationToLabel");
+      case "depart":
+        return ft("departDateLabel");
+      case "return":
+        return ft("returnDateLabel");
+      case "travelers":
+        return getTravelerText();
+      case "advanced":
+        return ft("advancedOptions");
+      case "departTime":
+      case "returnTime":
+        return ft("flightTime");
+      default:
+        return "";
+    }
+  };
+
+  const renderMobilePanelBody = () => {
+    const parsed = parseMobileFieldKey(activeField);
+    if (!parsed) return null;
+
+    switch (parsed.type) {
+      case "from":
+        return renderAirportPanelBody(true, parsed.flightId);
+      case "to":
+        return renderAirportPanelBody(false, parsed.flightId);
+      case "depart":
+        return renderCalendarPanelContent(false, parsed.flightId);
+      case "return":
+        return renderCalendarPanelContent(true, null);
+      case "travelers":
+        return renderTravelerPanelBody();
+      case "advanced":
+        return renderAdvancedPanelBody();
+      case "departTime":
+        return (
+          <FlightSliceTimePopover
+            takeoffFrom={s0DepFrom}
+            takeoffTo={s0DepTo}
+            landingFrom={s0ArrFrom}
+            landingTo={s0ArrTo}
+            onConfirm={(next) => {
+              setS0DepFrom(next.takeoffFrom);
+              setS0DepTo(next.takeoffTo);
+              setS0ArrFrom(next.landingFrom);
+              setS0ArrTo(next.landingTo);
+            }}
+            onClose={closeAllPanels}
+          />
+        );
+      case "returnTime":
+        return (
+          <FlightSliceTimePopover
+            takeoffFrom={s1DepFrom}
+            takeoffTo={s1DepTo}
+            landingFrom={s1ArrFrom}
+            landingTo={s1ArrTo}
+            onConfirm={(next) => {
+              setS1DepFrom(next.takeoffFrom);
+              setS1DepTo(next.takeoffTo);
+              setS1ArrFrom(next.landingFrom);
+              setS1ArrTo(next.landingTo);
+            }}
+            onClose={closeAllPanels}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderMobileHeaderSlot = () => {
+    const parsed = parseMobileFieldKey(activeField);
+    if (!parsed) return null;
+    if (parsed.type === "from") return renderAirportSearchInput(true, parsed.flightId);
+    if (parsed.type === "to") return renderAirportSearchInput(false, parsed.flightId);
+    return null;
+  };
+
+  const SLICE_TIME_BUTTON_CLASS =
+    "inline-flex items-center justify-center gap-2 px-3 text-sm font-medium text-primary transition hover:bg-primary/15";
+
+  const renderSliceTimeControl = (
+    which: "departTime" | "returnTime",
+    value: {
+      takeoffFrom: string;
+      takeoffTo: string;
+      landingFrom: string;
+      landingTo: string;
+    },
+    onChange: (next: {
+      takeoffFrom: string;
+      takeoffTo: string;
+      landingFrom: string;
+      landingTo: string;
+    }) => void,
+    onOpenChange: ((open: boolean) => void) | undefined,
+    triggerRef: React.RefObject<FlightSliceTimePopoverTriggerHandle | null>,
+  ) => {
+    if (isMobile) {
+      return (
+        <button
+          type="button"
+          onClick={() => openField(which)}
+          className={SLICE_TIME_BUTTON_CLASS}
+        >
+          <span className="truncate">{getSliceTimeButtonSummary(value)}</span>
+          <ChevronDown className="h-4 w-4 shrink-0" strokeWidth={2} />
+        </button>
+      );
+    }
+    return (
+      <FlightSliceTimePopoverTrigger
+        ref={triggerRef}
+        value={value}
+        onChange={onChange}
+        onOpenChange={onOpenChange}
+      />
+    );
+  };
+
   // Render City Input with Search functionality (parity with HotelsTab: skeleton, keyboard, highlight)
   const renderCityInput = (type, flight = null) => {
     const isFrom = type === "from";
@@ -748,6 +1482,7 @@ function FlightsTab({
     const highlightIndex = isFrom ? fromHighlightIndex : toHighlightIndex;
     const setHighlightIndex = isFrom ? setFromHighlightIndex : setToHighlightIndex;
     const flightId = flight?.id ?? null;
+    const showInlineInput = showDropdown && !isMobile;
 
     const displayText = flight
       ? isFrom
@@ -763,27 +1498,12 @@ function FlightsTab({
       <div className={`flex-1 relative`} ref={isFrom ? fromDropdownRef : toDropdownRef}>
         {/* Main Input Field - Shows search input when dropdown is open */}
         <div className="relative">
-          {showDropdown ? (
-            <div className={COMBO_FIELD_SHELL_CLASS}>
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder={ft("filterPlaceholder")}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={(e) => handleAirportSearchKeyDown(isFrom, e, flightId)}
-                className="w-full h-full bg-transparent border-none outline-none text-foreground font-medium placeholder-muted-foreground"
-                autoFocus
-              />
-            </div>
+          {showInlineInput ? (
+            renderAirportSearchInput(isFrom, flightId)
           ) : (
             <div
               className={COMBO_TRIGGER_CLASS}
-              onClick={() => {
-                setShowDropdown(true);
-                if (isFrom) setFromSearch("");
-                else setToSearch("");
-              }}
+              onClick={() => openAirportField(isFrom ? "from" : "to", flightId)}
             >
               <span className={selectedAirport ? "text-foreground font-semibold" : "text-muted-foreground"}>
                 {displayText}
@@ -796,95 +1516,11 @@ function FlightsTab({
           </label>
         </div>
 
-        {showDropdown && (
-          <div className="absolute  left-0 right-0  border border-input rounded bg-card shadow-lg z-[500] max-h-80 dropdown-scrollbar">
-            {search.trim().length < 2 ? (
-              <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
-                {ft("popularAirportsHint")}
-              </div>
-            ) : null}
-            <div
-              className="py-1"
-              role="listbox"
-              aria-label={isFrom ? ft("ariaOriginAirports") : ft("ariaDestinationAirports")}
-            >
-              {loading && search.trim().length >= 2 ? (
-                Array.from({ length: 6 }, (_, i) => (
-                  <div
-                    key={`airport-sk-${i}`}
-                    className="px-4 py-3 border-b border-border last:border-b-0"
-                    aria-hidden
-                  >
-                    <div className="flex justify-between items-start gap-3">
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Skeleton className="h-4 w-32" />
-                        <Skeleton className="h-3 w-48 max-w-full" />
-                      </div>
-                      <Skeleton className="h-7 w-12 shrink-0 rounded" />
-                    </div>
-                    <Skeleton className="h-3 w-24 mt-2" />
-                  </div>
-                ))
-              ) : search.trim().length >= 2 && listItems.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-muted-foreground">{ft("noMatchingAirports")}</div>
-              ) : (
-                listItems.map((item, index) => {
-                  if (item.kind === "popular") {
-                    const airport = item.a;
-                    return (
-                      <div
-                        key={`popular-${airport.code}-${index}`}
-                        role="option"
-                        aria-selected={highlightIndex === index}
-                        className={cn(
-                          "px-4 py-3 hover:bg-primary/10 cursor-pointer border-b border-border last:border-b-0",
-                          highlightIndex === index && "bg-primary/10 ring-1 ring-inset ring-primary/20",
-                        )}
-                        onMouseEnter={() => setHighlightIndex(index)}
-                        onClick={() => selectAirportListItem(isFrom ? "from" : "to", index, flightId)}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <div className="font-semibold text-foreground">{airport.city}</div>
-                            <div className="text-xs text-muted-foreground">{airport.name}</div>
-                          </div>
-                          <div className="text-sm font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
-                            {airport.code}
-                          </div>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1">{airport.country}</div>
-                      </div>
-                    );
-                  }
-                  const dto = item.dto;
-                  return (
-                    <div
-                      key={`api-${dto.iata_code}-${index}`}
-                      role="option"
-                      aria-selected={highlightIndex === index}
-                      className={cn(
-                        "px-4 py-3 hover:bg-primary/10 cursor-pointer border-b border-border last:border-b-0",
-                        highlightIndex === index && "bg-primary/10 ring-1 ring-inset ring-primary/20",
-                      )}
-                      onMouseEnter={() => setHighlightIndex(index)}
-                      onClick={() => selectAirportListItem(isFrom ? "from" : "to", index, flightId)}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="font-semibold text-foreground">{dto.city_name || ""}</div>
-                          <div className="text-xs text-muted-foreground">{dto.name}</div>
-                        </div>
-                        <div className="text-sm font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
-                          {dto.iata_code}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
+        {showInlinePanel(showDropdown) ? (
+          <div className="absolute left-0 right-0 border border-input rounded bg-card shadow-lg z-[500] max-h-80 dropdown-scrollbar">
+            {renderAirportPanelBody(isFrom, flightId)}
           </div>
-        )}
+        ) : null}
       </div>
     );
   };
@@ -927,7 +1563,7 @@ function FlightsTab({
           <div className="relative">
             <div
               className={COMBO_TRIGGER_CLASS}
-              onClick={() => setShowDepartDatePicker(true)}
+              onClick={() => openDateField(false, flight.id)}
             >
               <span
                 className={
@@ -943,50 +1579,13 @@ function FlightsTab({
             </label>
 
             {/* Calendar for additional flights */}
-            {showDepartDatePicker && (
-              <div className="absolute top-full left-0 right-0 mt-1 border border-input rounded-lg bg-background shadow-lg z-50 p-4 min-w-[320px] w-full">
-                {/* Calendar Header */}
-                <div className="flex items-center justify-between mb-4">
-                  <button
-                    onClick={() => prevMonth(false)}
-                    className="p-2 hover:bg-muted rounded-full transition-colors"
-                  >
-                    <ChevronLeft className="w-4 h-4 text-muted-foreground" strokeWidth={2} />
-                  </button>
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {formatMonthYear(new Date(currentYear, currentMonth))}
-                  </h3>
-                  <button
-                    onClick={() => nextMonth(false)}
-                    className="p-2 hover:bg-muted rounded-full transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" strokeWidth={2} />
-                  </button>
-                </div>
-
-                {/* Day Headers */}
-                <div className="grid grid-cols-7 gap-1 mb-2">
-                  {calendarWeekdays.map((day) => (
-                    <div
-                      key={day}
-                      className="h-8 w-8 flex items-center justify-center text-xs font-medium text-muted-foreground"
-                    >
-                      {day}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Calendar Days */}
-                <div className="grid grid-cols-7 gap-1">
-                  {renderCalendar(false, flight.id)}
-                </div>
+            {showInlinePanel(showDepartDatePicker) ? (
+              <div className="absolute top-full left-0 right-0 mt-1 min-w-[320px] w-full rounded-lg border border-input bg-background p-4 shadow-lg z-50">
+                {renderCalendarPanelContent(false, flight.id)}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
-
-        {/* Empty space for return date - 2 columns */}
-        {/* <div className="md:col-span-1"></div> */}
 
         {/* Cross Button - 1 column */}
         <div
@@ -1009,11 +1608,16 @@ function FlightsTab({
 
   return (
     <div className={cn("mx-auto max-w-7xl", isModal && "mx-0 w-full max-w-none")}>
-      {/* Trip Type and Cabin Class Row - Responsive */}
-      <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {changeSearchError ? (
+        <p className="mb-3 text-sm text-destructive" role="alert">
+          {changeSearchError}
+        </p>
+      ) : null}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="w-full sm:w-auto">
-          <div className="flex justify-between gap-4 sm:justify-start sm:gap-6">
-            {tripTypeOptions.map((type) => (
+          <div className="flex justify-between gap-4 sm:justify-start sm:gap-6 pb-5 sm:pb-0">
+            {!isChange
+              ? tripTypeOptions.map((type) => (
               <label
                 key={type.id}
                 className="flex flex-1 cursor-pointer items-center justify-center gap-2 sm:flex-none sm:justify-start"
@@ -1027,7 +1631,8 @@ function FlightsTab({
                 />
                 <span className="whitespace-nowrap text-sm font-bold text-muted-foreground">{type.label}</span>
               </label>
-            ))}
+              ))
+              : null}
           </div>
         </div>
       </div>
@@ -1037,8 +1642,8 @@ function FlightsTab({
           <div className="relative">
             <div
               className={COMBO_TRIGGER_CLASS}
-              style={{height: "30px"}}
-              onClick={() => setShowAdvanced((v) => !v)}
+              style={{ height: "30px" }}
+              onClick={openAdvancedField}
             >
               <div className="flex items-center gap-2">
                 <SlidersHorizontal className="h-4 w-4 text-primary dark:text-white" strokeWidth={2} />
@@ -1051,77 +1656,14 @@ function FlightsTab({
             </div>
           </div>
 
-          {showAdvanced ? (
-            <div className="absolute left-0 right-0 top-full z-50 mt-1 grid w-full grid-cols-1 gap-4  rounded border border-input bg-card p-4 shadow-lg  md:grid-cols-3">
-              <div className="md:col-span-3">
-                <label className="text-xs font-bold text-foreground">{ft("classLabel")}</label>
-                <div className="relative mt-1">
-                  <select
-                    value={cabinClass}
-                    onChange={(e) => setCabinClass(e.target.value)}
-                    className={`w-full ${INPUT_FIELD_CLASS} h-12 appearance-none py-2.5 font-medium text-muted-foreground`}
-                  >
-                    <option value="economy">{ft("cabinEconomy")}</option>
-                    <option value="premium-economy">{ft("cabinPremiumEconomy")}</option>
-                    <option value="business">{ft("cabinBusiness")}</option>
-                    <option value="first-class">{ft("cabinFirstClass")}</option>
-                  </select>
-                  <ChevronDown
-                    className="pointer-events-none absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground"
-                    strokeWidth={2}
-                  />
-                </div>
-              </div>
-              <div className="md:col-span-3">
-                <label className="text-xs font-bold text-muted-foreground">{ft("maxConnectionsLabel")}</label>
-                <div className="relative mt-1">
-                  <Select
-                    value={advMaxConnections === "" ? "any" : advMaxConnections}
-                    onValueChange={(v) => setAdvMaxConnections(v === "any" ? "" : v)}
-                  >
-                    <SelectTrigger
-                      className={`${INPUT_FIELD_CLASS} h-12 py-2.5 font-medium text-muted-foreground`}
-                    >
-                      <SelectValue placeholder={ft("maxConnectionsAny")} />
-                    </SelectTrigger>
-                    <SelectContent className="z-[200]">
-                      <SelectItem value="any">{ft("maxConnectionsAny")}</SelectItem>
-                      <SelectItem value="0">{ft("maxConnectionsDirect")}</SelectItem>
-                      <SelectItem value="1">{ft("maxConnectionsOne")}</SelectItem>
-                      <SelectItem value="2">{ft("maxConnectionsTwo")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="md:col-span-3">
-                <label className="text-xs font-bold text-muted-foreground">{ft("supplierTimeoutLabel")}</label>
-                <input
-                  type="number"
-                  min={5000}
-                  max={120000}
-                  step={1000}
-                  value={advSupplierTimeout}
-                  onChange={(e) => setAdvSupplierTimeout(parseInt(e.target.value, 10) || 60000)}
-                  className={INPUT_FIELD_CLASS}
-                />
-                <p className="mt-1 text-[11px] text-muted-foreground">{ft("supplierTimeoutHint")}</p>
-              </div>
-              <div className="md:col-span-3">
-
-              <div className="flex flex-col items-start justify-center">
-                <label className="text-xs font-bold text-foreground">{ft("preferredAirlinesLabel")}</label>
-                <p className="mb-1 text-[11px] text-muted-foreground">{ft("preferredAirlinesHint")}</p>
-              </div>
-              </div>
-              <div className="md:col-span-3">
-                <PreferredAirlinesCombobox selected={preferredCarrierIatas} onChange={setPreferredCarrierIatas} />
-              </div>
+          {showInlinePanel(showAdvanced) ? (
+            <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded border border-input bg-card p-4 shadow-lg">
+              {renderAdvancedPanelBody()}
             </div>
           ) : null}
         </div>
       </div>
 
-      {/* Search Form Grid with Search Button */}
       <div
         className={cn(
           "grid pb-4",
@@ -1129,9 +1671,7 @@ function FlightsTab({
         )}
       >
         {tripType === "multi-city" ? (
-          /* Multi City Layout - Same grid as one-way */
           <>
-            {/* First Flight */}
             <div className="md:col-span-12">
               <div
                 className={cn(
@@ -1139,31 +1679,24 @@ function FlightsTab({
                   isModal ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-12" : "grid-cols-1 md:grid-cols-12",
                 )}
               >
-                {/* Container for both location fields and swap button - 5 columns */}
                 <div
                   className={cn(
                     "relative flex flex-col gap-2 md:flex-row",
                     isModal ? cn("sm:col-span-2", MODAL_LG_GRID.locations) : "md:col-span-5",
                   )}
                 >
-                  {/* Flying From */}
-                  {renderCityInput('from', flights[0])}
-
-                  {/* Swap Button - Exactly like one-way */}
+                  {renderCityInput("from", flights[0])}
                   <button
                     onClick={() => swapAirports(flights[0].id)}
-                    className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10 w-8 h-8 bg-card border border-input rounded-full flex items-center justify-center shadow-md hover:shadow-lg transition-all duration-200 hover:bg-muted active:scale-95"
+                    className="absolute left-1/2 top-1/2 z-10 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-input bg-card shadow-md transition-all duration-200 hover:bg-muted hover:shadow-lg active:scale-95"
                     title={ft("swapDestinationsTitle")}
                     disabled={!flights[0].from || !flights[0].to}
                   >
-                    <ArrowLeftRight className="w-4 h-4 text-muted-foreground rotate-90 sm:rotate-0" strokeWidth={2} />
+                    <ArrowLeftRight className="h-4 w-4 rotate-90 text-muted-foreground sm:rotate-0" strokeWidth={2} />
                   </button>
-
-                  {/* Destination To */}
-                  {renderCityInput('to', flights[0])}
+                  {renderCityInput("to", flights[0])}
                 </div>
 
-                {/* Depart Date - 2 columns */}
                 <div
                   className={cn(
                     "relative",
@@ -1174,68 +1707,31 @@ function FlightsTab({
                   <div className="relative">
                     <div
                       className={COMBO_TRIGGER_CLASS}
-                      onClick={() =>
-                        setShowDepartDatePicker(!showDepartDatePicker)
-                      }
+                      onClick={() => openDateField(false, flights[0].id)}
                     >
                       <span
-                        className={`${flights[0].date ? "text-foreground font-semibold" : "text-muted-foreground"
-                          }`}
+                        className={
+                          flights[0].date ? "font-semibold text-foreground" : "text-muted-foreground"
+                        }
                       >
                         {formatDate(flights[0].date)}
                       </span>
-                      <Calendar className="w-5 h-5 text-muted-foreground dark:text-white pointer-events-none" strokeWidth={2} />
+                      <Calendar
+                        className="pointer-events-none h-5 w-5 text-muted-foreground dark:text-white"
+                        strokeWidth={2}
+                      />
                     </div>
-                    <label className="absolute left-4 top-2 text-xs font-bold text-muted-foreground pointer-events-none">
+                    <label className="pointer-events-none absolute left-4 top-2 text-xs font-bold text-muted-foreground">
                       {ft("departDateLabel")}
                     </label>
-
-                    {/* Calendar for default flight */}
-                    {showDepartDatePicker && (
-                      <div className="absolute top-full left-0 right-0 mt-1 border border-input rounded-lg bg-background shadow-lg z-50 p-4 min-w-[320px] w-full">
-                        {/* Calendar Header */}
-                        <div className="flex items-center justify-between mb-4">
-                          <button
-                            onClick={() => prevMonth(false)}
-                            className="p-2 hover:bg-muted rounded-full transition-colors"
-                          >
-                            <ChevronLeft className="w-4 h-4 text-muted-foreground" strokeWidth={2} />
-                          </button>
-                          <h3 className="text-sm font-semibold text-foreground">
-                            {formatMonthYear(
-                              new Date(currentYear, currentMonth)
-                            )}
-                          </h3>
-                          <button
-                            onClick={() => nextMonth(false)}
-                            className="p-2 hover:bg-muted rounded-full transition-colors"
-                          >
-                            <ChevronRight className="w-4 h-4 text-muted-foreground" strokeWidth={2} />
-                          </button>
-                        </div>
-
-                        {/* Day Headers */}
-                        <div className="grid grid-cols-7 gap-1 mb-2">
-                          {calendarWeekdays.map((day) => (
-                            <div
-                              key={day}
-                              className="h-8 w-8 flex items-center justify-center text-xs font-medium text-muted-foreground"
-                            >
-                              {day}
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Calendar Days */}
-                        <div className="grid grid-cols-7 gap-1">
-                          {renderCalendar(false, flights[0].id)}
-                        </div>
+                    {showInlinePanel(showDepartDatePicker) ? (
+                      <div className="absolute left-0 right-0 top-full z-50 mt-1 w-full min-w-[320px] rounded-lg border border-input bg-background p-4 shadow-lg">
+                        {renderCalendarPanelContent(false, flights[0].id)}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
-                {/* Travellers - 4 columns */}
                 <div
                   className={cn(
                     "relative",
@@ -1245,160 +1741,45 @@ function FlightsTab({
                 >
                   <div className="relative">
                     <div
-                      className={COMBO_TRIGGER_CLASS}
-                      onClick={() =>
-                        setShowTravelerDropdown(!showTravelerDropdown)
-                      }
+                      className={cn(COMBO_TRIGGER_CLASS, isChange && "cursor-default opacity-90")}
+                      onClick={openTravelersField}
+                      aria-readonly={isChange || undefined}
                     >
                       <div className="flex items-center gap-2">
-                        <Users className="w-5 h-5 text-primary dark:text-white" strokeWidth={2} />
+                        <Users className="h-5 w-5 text-primary dark:text-white" strokeWidth={2} />
                         <span className="text-muted-foreground">{getTravelerText()}</span>
                       </div>
                       <ChevronDown
-                        className={`w-4 h-4 text-primary dark:text-white transition-transform ${showTravelerDropdown ? "rotate-180" : ""}`}
+                        className={`h-4 w-4 text-primary transition-transform dark:text-white ${showTravelerDropdown ? "rotate-180" : ""}`}
                         strokeWidth={2}
                       />
                     </div>
+                    {showInlinePanel(showTravelerDropdown) ? (
+                      <div className="absolute left-0 right-0 top-full z-50 mt-1 w-full rounded border border-input bg-card p-4 shadow-lg">
+                        {renderTravelerPanelBody()}
+                      </div>
+                    ) : null}
                   </div>
-
-                  {/* Traveler Counter Dropdown - Fixed positioning */}
-                  {showTravelerDropdown && (
-                    <div className="absolute top-full left-0 right-0 mt-1 p-4 border border-input rounded bg-card shadow-lg z-50 w-full">
-                      <div className="flex justify-between items-center mb-4">
-                        <span className="text-sm font-bold text-muted-foreground">
-                          {ft("adultsLabel")}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() =>
-                              updateTravelers("adults", "decrement")
-                            }
-                            className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={travelers.adults <= 1}
-                          >
-                            -
-                          </button>
-                          <span className="text-sm font-bold w-6 text-center text-muted-foreground">
-                            {travelers.adults}
-                          </span>
-                          <button
-                            onClick={() =>
-                              updateTravelers("adults", "increment")
-                            }
-                            className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex justify-between items-center mb-4">
-                        <span className="text-sm font-bold text-muted-foreground">
-                          {ft("childrenLabel")}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() =>
-                              updateTravelers("children", "decrement")
-                            }
-                            className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={travelers.children <= 0}
-                          >
-                            -
-                          </button>
-                          <span className="text-sm font-bold w-6 text-center text-muted-foreground">
-                            {travelers.children}
-                          </span>
-                          <button
-                            onClick={() =>
-                              updateTravelers("children", "increment")
-                            }
-                            className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex justify-between items-center mb-4">
-                        <span className="text-sm font-bold text-muted-foreground">
-                          {ft("infantsLabel")}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() =>
-                              updateTravelers("infants", "decrement")
-                            }
-                            className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={travelers.infants <= 0}
-                          >
-                            -
-                          </button>
-                          <span className="text-sm font-bold w-6 text-center text-muted-foreground">
-                            {travelers.infants}
-                          </span>
-                          <button
-                            onClick={() =>
-                              updateTravelers("infants", "increment")
-                            }
-                            className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-
-                      {travelers.children > 0 ? (
-                        <div className="border-t border-border pt-3 mt-2 space-y-2">
-                          <p className="text-xs text-muted-foreground">
-                            {ft("childAgeHint")}
-                          </p>
-                          {childAges.slice(0, travelers.children).map((age, idx) => (
-                            <div key={idx} className="flex items-center justify-between gap-2">
-                              <span className="text-sm font-medium text-foreground">{ft("childLabel", { n: idx + 1 })}</span>
-                              <select
-                                className="rounded-lg border border-input bg-background px-2 py-1 text-sm"
-                                value={age}
-                                onChange={(e) => {
-                                  const v = parseInt(e.target.value, 10);
-                                  setChildAges((prev) => {
-                                    const next = [...prev];
-                                    next[idx] = v;
-                                    return next;
-                                  });
-                                }}
-                              >
-                                {Array.from({ length: 16 }, (_, i) => i + 2).map((a) => (
-                                  <option key={a} value={a}>
-                                    {ft("yearsOld", { years: a })}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
-
-                {/* Search Button - 1 column (now on same line) */}
-                <div
-                  className={cn(
-                    "flex",
-                    isModal ? cn("sm:col-span-2", MODAL_LG_GRID.searchOneWayMulti) : "md:col-span-1",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={onSearchNavigate}
-                    className="w-full min-h-[48px] bg-primary hover:bg-primary-600 text-white rounded-lg flex items-center justify-center transition-colors font-semibold"
-                    aria-label={ft("searchFlightsAria")}
-                  >
-                    <Search className="w-6 h-6" strokeWidth={2} aria-hidden />
-                  </button>
                 </div>
               </div>
+
+              <div
+                className={cn(
+                  "flex",
+                  isModal ? cn("sm:col-span-2", MODAL_LG_GRID.searchOneWayMulti) : "md:col-span-1",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={onSearchNavigate}
+                  disabled={changeSearchBusy}
+                  className="flex min-h-[48px] w-full items-center justify-center rounded-lg bg-primary font-semibold text-white transition-colors hover:bg-primary-600 disabled:opacity-50"
+                  aria-label={ft("searchFlightsAria")}
+                >
+                  <Search className="h-6 w-6" strokeWidth={2} aria-hidden />
+                </button>
+              </div>
+            </div>
 
               {/* Additional Flights */}
               <div className="space-y-3">
@@ -1419,7 +1800,6 @@ function FlightsTab({
                   {ft("addAnotherFlight")}
                 </button>
               </div>
-            </div>
           </>
         ) : (
           /* One Way & Round Trip Layout (unchanged) */
@@ -1459,67 +1839,36 @@ function FlightsTab({
                 </label>
                 <div
                   className={COMBO_TRIGGER_CLASS}
-                  onClick={() => {
-                    departTimeTriggerRef.current?.close();
-                    setShowDepartDatePicker(!showDepartDatePicker);
-                  }}
+                  onClick={() => openDateField(false, null)}
                 >
                   <div className="min-w-0 flex-1">{formatDateSegmentsDisplay(departDate)}</div>
                   <Calendar className="h-5 w-5 shrink-0 text-muted-foreground pointer-events-none dark:text-white" strokeWidth={2} />
                 </div>
-                {showDepartDatePicker ? (
+                {showInlinePanel(showDepartDatePicker) ? (
                   <div className="absolute left-0 right-0 top-full z-50 mt-1 min-w-[320px] w-full rounded-lg border border-input bg-background p-4 shadow-lg">
-                    <div className="mb-4 flex items-center justify-between">
-                      <button
-                        type="button"
-                        onClick={() => prevMonth(false)}
-                        className="rounded-full p-2 transition-colors hover:bg-muted"
-                      >
-                        <ChevronLeft className="h-4 w-4 text-muted-foreground" strokeWidth={2} />
-                      </button>
-                      <h3 className="text-sm font-semibold text-foreground">
-                        {formatMonthYear(new Date(currentYear, currentMonth))}
-                      </h3>
-                      <button
-                        type="button"
-                        onClick={() => nextMonth(false)}
-                        className="rounded-full p-2 transition-colors hover:bg-muted"
-                      >
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" strokeWidth={2} />
-                      </button>
-                    </div>
-                    <div className="mb-2 grid grid-cols-7 gap-1">
-                      {calendarWeekdays.map((day) => (
-                        <div
-                          key={day}
-                          className="flex h-8 w-8 items-center justify-center text-xs font-medium text-muted-foreground"
-                        >
-                          {day}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-7 gap-1">{renderCalendar(false)}</div>
+                    {renderCalendarPanelContent(false, null)}
                   </div>
                 ) : null}
               </div>
-              <FlightSliceTimePopoverTrigger
-                ref={departTimeTriggerRef}
-                value={{
+              {renderSliceTimeControl(
+                "departTime",
+                {
                   takeoffFrom: s0DepFrom,
                   takeoffTo: s0DepTo,
                   landingFrom: s0ArrFrom,
                   landingTo: s0ArrTo,
-                }}
-                onChange={(next) => {
+                },
+                (next) => {
                   setS0DepFrom(next.takeoffFrom);
                   setS0DepTo(next.takeoffTo);
                   setS0ArrFrom(next.landingFrom);
                   setS0ArrTo(next.landingTo);
-                }}
-                onOpenChange={(o) => {
+                },
+                (o) => {
                   if (o) setShowDepartDatePicker(false);
-                }}
-              />
+                },
+                departTimeTriggerRef,
+              )}
             </div>
 
             {/* Return date + flight time (round-trip) */}
@@ -1534,67 +1883,36 @@ function FlightsTab({
                   </label>
                   <div
                     className={COMBO_TRIGGER_CLASS}
-                    onClick={() => {
-                      returnTimeTriggerRef.current?.close();
-                      setShowReturnDatePicker(!showReturnDatePicker);
-                    }}
+                    onClick={() => openDateField(true, null)}
                   >
                     <div className="min-w-0 flex-1">{formatDateSegmentsDisplay(returnDate)}</div>
                     <Calendar className="h-5 w-5 shrink-0 text-muted-foreground pointer-events-none dark:text-white" strokeWidth={2} />
                   </div>
-                  {showReturnDatePicker ? (
+                  {showInlinePanel(showReturnDatePicker) ? (
                     <div className="absolute left-0 right-0 top-full z-50 mt-1 min-w-[320px] w-full rounded-lg border border-input bg-background p-4 shadow-lg">
-                      <div className="mb-4 flex items-center justify-between">
-                        <button
-                          type="button"
-                          onClick={() => prevMonth(true)}
-                          className="rounded-full p-2 transition-colors hover:bg-muted"
-                        >
-                          <ChevronLeft className="h-4 w-4 text-muted-foreground" strokeWidth={2} />
-                        </button>
-                        <h3 className="text-sm font-semibold text-foreground">
-                          {formatMonthYear(new Date(returnCurrentYear, returnCurrentMonth))}
-                        </h3>
-                        <button
-                          type="button"
-                          onClick={() => nextMonth(true)}
-                          className="rounded-full p-2 transition-colors hover:bg-muted"
-                        >
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" strokeWidth={2} />
-                        </button>
-                      </div>
-                      <div className="mb-2 grid grid-cols-7 gap-1">
-                        {calendarWeekdays.map((day) => (
-                          <div
-                            key={day}
-                            className="flex h-8 w-8 items-center justify-center text-xs font-medium text-muted-foreground"
-                          >
-                            {day}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="grid grid-cols-7 gap-1">{renderCalendar(true)}</div>
+                      {renderCalendarPanelContent(true, null)}
                     </div>
                   ) : null}
                 </div>
-                <FlightSliceTimePopoverTrigger
-                  ref={returnTimeTriggerRef}
-                  value={{
+                {renderSliceTimeControl(
+                  "returnTime",
+                  {
                     takeoffFrom: s1DepFrom,
                     takeoffTo: s1DepTo,
                     landingFrom: s1ArrFrom,
                     landingTo: s1ArrTo,
-                  }}
-                  onChange={(next) => {
+                  },
+                  (next) => {
                     setS1DepFrom(next.takeoffFrom);
                     setS1DepTo(next.takeoffTo);
                     setS1ArrFrom(next.landingFrom);
                     setS1ArrTo(next.landingTo);
-                  }}
-                  onOpenChange={(o) => {
+                  },
+                  (o) => {
                     if (o) setShowReturnDatePicker(false);
-                  }}
-                />
+                  },
+                  returnTimeTriggerRef,
+                )}
               </div>
             ) : null}
 
@@ -1610,8 +1928,9 @@ function FlightsTab({
             >
               <div className="relative">
                 <div
-                  className={COMBO_TRIGGER_CLASS}
-                  onClick={() => setShowTravelerDropdown(!showTravelerDropdown)}
+                  className={cn(COMBO_TRIGGER_CLASS, isChange && "cursor-default opacity-90")}
+                  onClick={openTravelersField}
+                  aria-readonly={isChange || undefined}
                 >
                   <div className="flex items-center gap-2">
                     <Users className="w-5 h-5 text-primary dark:text-white" strokeWidth={2} />
@@ -1624,120 +1943,11 @@ function FlightsTab({
                 </div>
 
                 {/* Traveler Counter Dropdown - Fixed positioning */}
-                {showTravelerDropdown && (
+                {showInlinePanel(showTravelerDropdown) ? (
                   <div className="absolute top-full left-0 right-0 mt-1 p-4 border border-input rounded bg-card shadow-lg z-50 w-full">
-                    <div className="flex justify-between items-center mb-4">
-                      <span className="text-sm font-bold text-muted-foreground">
-                        {ft("adultsLabel")}
-                      </span>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => updateTravelers("adults", "decrement")}
-                          className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                          disabled={travelers.adults <= 1}
-                        >
-                          -
-                        </button>
-                        <span className="text-sm font-bold w-6 text-center text-muted-foreground text-muted-foreground">
-                          {travelers.adults}
-                        </span>
-                        <button
-                          onClick={() => updateTravelers("adults", "increment")}
-                          className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center mb-4">
-                      <span className="text-sm font-bold text-muted-foreground">
-                        {ft("childrenLabel")}
-                      </span>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() =>
-                            updateTravelers("children", "decrement")
-                          }
-                          className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                          disabled={travelers.children <= 0}
-                        >
-                          -
-                        </button>
-                        <span className="text-sm font-bold w-6 text-center text-muted-foreground">
-                          {travelers.children}
-                        </span>
-                        <button
-                          onClick={() =>
-                            updateTravelers("children", "increment")
-                          }
-                          className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center mb-4">
-                      <span className="text-sm font-bold text-muted-foreground">
-                        {ft("infantsLabel")}
-                      </span>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() =>
-                            updateTravelers("infants", "decrement")
-                          }
-                          className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                          disabled={travelers.infants <= 0}
-                        >
-                          -
-                        </button>
-                        <span className="text-sm font-bold w-6 text-center text-muted-foreground">
-                          {travelers.infants}
-                        </span>
-                        <button
-                          onClick={() =>
-                            updateTravelers("infants", "increment")
-                          }
-                          className="w-8 h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    {travelers.children > 0 ? (
-                      <div className="border-t border-border pt-3 mt-2 space-y-2">
-                        <p className="text-xs text-muted-foreground">
-                          {ft("childAgeHint")}
-                        </p>
-                        {childAges.slice(0, travelers.children).map((age, idx) => (
-                          <div key={idx} className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-medium text-foreground">{ft("childLabel", { n: idx + 1 })}</span>
-                            <select
-                              className="rounded-lg border border-input bg-background px-2 py-1 text-sm"
-                              value={age}
-                              onChange={(e) => {
-                                const v = parseInt(e.target.value, 10);
-                                setChildAges((prev) => {
-                                  const next = [...prev];
-                                  next[idx] = v;
-                                  return next;
-                                });
-                              }}
-                            >
-                              {Array.from({ length: 16 }, (_, i) => i + 2).map((a) => (
-                                <option key={a} value={a}>
-                                  {ft("yearsOld", { years: a })}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
+                    {renderTravelerPanelBody()}
                   </div>
-                )}
+                ) : null}
               </div>
             </div>
 
@@ -1752,7 +1962,8 @@ function FlightsTab({
               <button
                 type="button"
                 onClick={onSearchNavigate}
-                className="w-full  py-3 sm:py-5 px-6 bg-primary hover:bg-primary-600 text-white rounded-lg flex items-center justify-center transition-colors font-semibold"
+                disabled={changeSearchBusy}
+                className="w-full  py-3 sm:py-5 px-6 bg-primary hover:bg-primary-600 text-white rounded-lg flex items-center justify-center transition-colors font-semibold disabled:opacity-50"
                 aria-label={ft("searchFlightsAria")}
               >
                 <Search className="w-6 h-6" strokeWidth={2} aria-hidden />
@@ -1761,6 +1972,16 @@ function FlightsTab({
           </>
         )}
       </div>
+
+      <MobileFullscreenSearchOverlay
+        open={!!activeField}
+        onClose={closeAllPanels}
+        title={getMobileOverlayTitle(activeField)}
+        headerSlot={renderMobileHeaderSlot()}
+        closeAriaLabel={tCommon("close")}
+      >
+        {renderMobilePanelBody()}
+      </MobileFullscreenSearchOverlay>
     </div>
   );
 }

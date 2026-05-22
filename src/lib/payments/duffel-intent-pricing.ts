@@ -74,3 +74,14 @@ export function computeDuffelPaymentIntentBreakdown(
     charge_currency: offerCurrency,
   };
 }
+
+/** Customer charge for a positive order-change delta (markup + Duffel fee on the airline delta only). */
+export function computeOrderChangePaymentBreakdown(
+  changeAmount: string,
+  changeCurrency: string,
+  cfg: FlightPaymentsResolvedConfig,
+): DuffelIntentPriceBreakdown {
+  return computeDuffelPaymentIntentBreakdown(changeAmount, changeCurrency, cfg, {
+    servicesSubtotal: "0",
+  });
+}

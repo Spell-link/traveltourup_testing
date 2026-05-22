@@ -291,14 +291,14 @@ export default function Footer() {
               {t("contactTitle")}
             </h3>
             <ul className="space-y-4">
-              <li className="flex items-start gap-3">
+              {/* <li className="flex items-start gap-3">
                 <MapPin className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" strokeWidth={2} />
                 <span className="text-muted-foreground text-sm">
                   {CONTACT.address}
                   <br />
                   {CONTACT.addressLine2}
                 </span>
-              </li>
+              </li> */}
               <li className="flex items-center gap-3">
                 <Phone className="w-5 h-5 text-primary flex-shrink-0" strokeWidth={2} />
                 <a href={`tel:${CONTACT.phone.replace(/\s/g, "")}`} className="text-muted-foreground hover:text-primary text-sm transition-colors">

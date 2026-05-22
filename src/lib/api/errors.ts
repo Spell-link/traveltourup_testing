@@ -45,10 +45,12 @@ export class BookingFailedAfterPaymentError extends AppError {
   readonly supportReference?: string;
   /** Duffel PaymentIntent id (`pit_…`); same as support reference when card payments are used. */
   readonly paymentIntentId?: string;
+  readonly upstreamMessage?: string;
   constructor(
     message = "Payment succeeded but the flight booking could not be completed. Contact support with the reference below.",
     supportReference?: string,
     paymentIntentId?: string,
+    upstreamMessage?: string,
   ) {
     const full =
       supportReference != null && supportReference !== ""
@@ -58,6 +60,7 @@ export class BookingFailedAfterPaymentError extends AppError {
     this.name = "BookingFailedAfterPaymentError";
     this.supportReference = supportReference;
     this.paymentIntentId = paymentIntentId ?? supportReference;
+    this.upstreamMessage = upstreamMessage;
   }
 }
 

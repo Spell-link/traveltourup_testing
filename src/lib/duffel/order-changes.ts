@@ -58,9 +58,22 @@ export function createOrderChange(orderChangeOfferId: string) {
 }
 
 /** Confirm a pending order change (when not auto-confirmed by the airline). */
-export function confirmOrderChange(orderChangeId: string) {
+export function confirmOrderChange(
+  orderChangeId: string,
+  payment?: { type: "balance"; amount: string; currency: string },
+) {
+  const data: Record<string, unknown> = {};
+  if (payment) {
+    data.payment = payment;
+  }
   return duffelFetch<unknown>(
     `/air/order_changes/${encodeURIComponent(orderChangeId)}/actions/confirm`,
-    { method: "POST", body: JSON.stringify({ data: {} }) },
+    { method: "POST", body: JSON.stringify({ data }) },
   );
+}
+
+export function getOrderChange(orderChangeId: string) {
+  return duffelFetch<unknown>(`/air/order_changes/${encodeURIComponent(orderChangeId)}`, {
+    method: "GET",
+  });
 }

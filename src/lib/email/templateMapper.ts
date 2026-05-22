@@ -71,7 +71,7 @@ export async function resolveTemplate(
     case EmailType.cancel: {
       const props = cancelPropsSchema.parse(data);
       const html = await generateCancelBookingHtml(props);
-      return { subject: `Booking cancelled — ${props.bookingReference}`, html };
+      return { subject: `Cancellation confirmed — ${props.bookingReference}`, html };
     }
     case EmailType.refund: {
       const props = refundPropsSchema.parse(data);

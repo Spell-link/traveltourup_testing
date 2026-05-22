@@ -324,6 +324,8 @@ export async function processDuffelFlightBookingCancel(input: {
           duffel_cancellation_id: parsed.duffelCancellationId,
           refund_to: parsed.refundTo,
           payment_status: payStatus,
+          airline_refund_to_balance: parsed.refundAmount,
+          refund_currency: parsed.refundCurrency,
         },
       });
 
@@ -435,6 +437,8 @@ export async function processDuffelFlightBookingCancel(input: {
       duffel_cancellation_id: oc.duffel_cancellation_id,
       refund_to: parsed.refundTo,
       payment_status: payStatus,
+      airline_refund_to_balance: parsed.refundAmount,
+      refund_currency: parsed.refundCurrency,
     },
   });
 

@@ -21,6 +21,19 @@ function isPrismaUniqueViolation(
   return isRecord(error) && error.code === "P2002";
 }
 
+/** Postgres CHECK failures (e.g. invalid order-change status). */
+function prismaCheckConstraintMessage(error: unknown): string | null {
+  if (!isRecord(error)) return null;
+  const msg = typeof error.message === "string" ? error.message : "";
+  if (
+    msg.includes("flight_order_changes_status_check") ||
+    msg.includes("violates check constraint")
+  ) {
+    return "Order change could not be saved (invalid status). Ensure database migrations are up to date.";
+  }
+  return null;
+}
+
 /** Infer slug conflict from Prisma P2002 meta.target (field or constraint names). */
 function prismaUniqueViolationIsSlug(error: { meta?: { target?: string | string[] } }): boolean {
   const t = error.meta?.target;
@@ -76,6 +89,9 @@ export function handleApiError(error: unknown) {
           : {}),
         ...(error.paymentIntentId != null && error.paymentIntentId !== ""
           ? { payment_intent_id: error.paymentIntentId }
+          : {}),
+        ...(error.upstreamMessage != null && error.upstreamMessage !== ""
+          ? { upstream_message: error.upstreamMessage }
           : {}),
       },
       { status: error.statusCode },
@@ -144,6 +160,14 @@ export function handleApiError(error: unknown) {
     return NextResponse.json(
       { success: false as const, code: "VALIDATION_ERROR" as const, issues: error.issues },
       { status: 400 },
+    );
+  }
+
+  const checkMsg = prismaCheckConstraintMessage(error);
+  if (checkMsg) {
+    return NextResponse.json(
+      { success: false as const, code: "CONFLICT" as const, message: checkMsg },
+      { status: 409 },
     );
   }
 

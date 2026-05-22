@@ -3,7 +3,7 @@
  *
  * Refactor notes:
  * - **Content** (React Email templates, subject lines) lives in `emailService` + `templateMapper` + `lib/email/templates/*`.
- * - **Transport** (Resend, optional `EMAIL_MOCK`) lives in `src/lib/email/sendEmail.ts`.
+ * - **Transport** (Hostinger Titan SMTP via Nodemailer, optional `EMAIL_MOCK`) lives in `src/lib/email/sendEmail.ts`.
  * - This file stays the public entry so callers (Supabase hook, `/api/email/send`) keep importing `sendEmail` from `@/lib/email`.
  *
  * Auth emails use the Supabase Send Email Hook → `POST /api/auth/supabase-email-hook`, which calls the same `sendEmail` pipeline.

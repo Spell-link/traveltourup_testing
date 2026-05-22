@@ -131,6 +131,9 @@ export interface DataTableProps<T> {
   defaultView?: "table" | "grid";
   onViewChange?: (view: "table" | "grid") => void;
   onRowClick?: (row: T) => void;
+  getRowId?: (row: T) => string;
+  getRowClassName?: (row: T) => string;
+  tableWrapperClassName?: string;
   className?: string;
   emptyMessage?: string;
   gridRenderItem?: (item: T, index: number) => React.ReactNode;
@@ -181,6 +184,9 @@ const DataTable = <T extends Record<string, any>>({
   defaultView = "table",
   onViewChange,
   onRowClick,
+  getRowId,
+  getRowClassName,
+  tableWrapperClassName,
   className,
   emptyMessage = "No data available",
   gridRenderItem,
@@ -658,7 +664,7 @@ const DataTable = <T extends Record<string, any>>({
           <p className="text-muted-foreground">{emptyMessage}</p>
         </div>
       ) : currentView === "table" ? (
-        <div className="rounded-md border border-border">
+        <div className={cn("rounded-md border border-border", tableWrapperClassName)}>
           <Table>
             <TableHeader>
               <TableRow>
@@ -697,11 +703,15 @@ const DataTable = <T extends Record<string, any>>({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((row, index) => (
+              {data.map((row, index) => {
+                const rowId = getRowId?.(row);
+                return (
                 <TableRow
-                  key={index}
+                  key={rowId ?? index}
+                  data-row-id={rowId}
                   className={cn(
-                    onRowClick ? "cursor-pointer hover:bg-muted/50" : ""
+                    onRowClick ? "cursor-pointer hover:bg-muted/50" : "",
+                    getRowClassName?.(row),
                   )}
                   onClick={() => onRowClick?.(row)}
                 >
@@ -722,7 +732,8 @@ const DataTable = <T extends Record<string, any>>({
                     </TableCell>
                   )}
                 </TableRow>
-              ))}
+              );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -736,7 +747,7 @@ const DataTable = <T extends Record<string, any>>({
 
       {/* Pagination */}
       {totalCount > 0 && (
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row items-center sm:justify-between">
           <div className="text-sm text-muted-foreground">
             Showing {startItem} to {endItem} of {totalCount} entries
           </div>

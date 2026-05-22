@@ -30,6 +30,9 @@ export const bookingListInclude = {
       last_offer_total_currency: true,
       offer_expires_at: true,
       itinerary_snapshot: true,
+      ticket_pdf_storage_path: true,
+      ticket_pdf_generated_at: true,
+      ticket_pdf_generation_failed_at: true,
       created_at: true,
       updated_at: true,
     },
@@ -108,11 +111,12 @@ export const bookingRepository = {
     where: Prisma.BookingWhereInput;
     skip: number;
     take: number;
+    orderBy?: Prisma.BookingOrderByWithRelationInput;
   }) {
     const [rows, total] = await Promise.all([
       prisma.booking.findMany({
         where: args.where,
-        orderBy: { created_at: "desc" },
+        orderBy: args.orderBy ?? { created_at: "desc" },
         skip: args.skip,
         take: args.take,
         include: bookingListInclude,

@@ -102,6 +102,22 @@ export async function deleteFromStorage(params: {
   }
 }
 
+export async function downloadObjectFromStorage(params: {
+  variant: StorageVariantConfig;
+  path: string;
+}): Promise<ArrayBuffer> {
+  const path = params.path.trim();
+  if (!params.variant.isValidStoragePath(path)) {
+    throw new AppError(400, "Invalid storage path", "STORAGE_PATH_INVALID");
+  }
+  const supabase = createSupabaseServiceRoleClient();
+  const { data, error } = await supabase.storage.from(params.variant.bucket).download(path);
+  if (error || !data) {
+    throw new AppError(502, error?.message ?? "Could not download file from storage", "STORAGE_DOWNLOAD");
+  }
+  return data.arrayBuffer();
+}
+
 export async function getSignedDownloadUrl(params: {
   variant: StorageVariantConfig;
   path: string;

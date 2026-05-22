@@ -8,6 +8,13 @@ import { getDuffelOrder } from "@/lib/duffel/orders";
 import { staysGetBooking } from "@/lib/duffel/stays-http";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/obs/logger";
+import { reconcileExternalOrderCancellation } from "@/lib/services/flights/flight-webhook-cancel.service";
+import {
+  applyCancellationRefundRemoteStatus,
+  applyCompensationRefundRemoteStatus,
+} from "@/lib/services/flights/flight-refund.service";
+import { parseCancellationFromDuffelOrder } from "@/lib/services/flights/flight-order-cancellation-parse";
+import { isCardRefundPath } from "@/lib/services/flights/flight-refund.core";
 
 function getOrderObjectFromWebhookPayload(payload: Record<string, unknown>): Record<string, unknown> | null {
   const data = payload.data;
@@ -35,6 +42,16 @@ function isOrderCancelledInDuffelOrder(order: Record<string, unknown>): boolean 
     const c = cancel as Record<string, unknown>;
     if (typeof c.confirmed_at === "string" && c.confirmed_at.length > 0) return true;
   }
+  return false;
+}
+
+/** Re-fetch order when webhook payload is thin or cancellation refund fields are missing. */
+function orderNeedsFreshFetch(order: Record<string, unknown>): boolean {
+  if (typeof order.total_amount !== "string") return true;
+  if (!isOrderCancelledInDuffelOrder(order)) return false;
+  const parsed = parseCancellationFromDuffelOrder(order);
+  if (!parsed?.confirmedAt) return true;
+  if (isCardRefundPath(parsed.refundTo) && !parsed.refundAmount) return true;
   return false;
 }
 
@@ -150,67 +167,61 @@ async function handleRefundWebhook(
     where: { duffel_refund_id: id },
     include: { booking: true },
   });
-  if (!attempt) return;
 
-  const remoteStatus = typeof obj.status === "string" ? obj.status.toLowerCase() : null;
-  let attemptStatus: "pending" | "succeeded" | "failed" | null = null;
-  let bookingPaymentStatus: string | null = null;
-  let eventType: "refund_succeeded" | "refund_failed" | null = null;
+  const remote = {
+    ...obj,
+    id,
+    status: typeof obj.status === "string" ? obj.status : undefined,
+    amount: typeof obj.amount === "string" ? obj.amount : undefined,
+    currency: typeof obj.currency === "string" ? obj.currency : undefined,
+    payment_intent_id:
+      typeof obj.payment_intent_id === "string" ? obj.payment_intent_id : undefined,
+  } as import("@/lib/duffel/refunds").DuffelRefundResource;
 
-  if (remoteStatus === "succeeded" || remoteStatus === "completed") {
-    attemptStatus = "succeeded";
-    const refundedAmount = Number.parseFloat(attempt.amount ?? "0");
-    const bookingTotal = Number.parseFloat(
-      attempt.booking?.total_amount.toString() ?? "0",
-    );
-    const fully = bookingTotal > 0 && refundedAmount + 0.005 >= bookingTotal;
-    bookingPaymentStatus = fully ? "refunded" : "partially_refunded";
-    eventType = "refund_succeeded";
-  } else if (remoteStatus === "failed" || remoteStatus === "canceled") {
-    attemptStatus = "failed";
-    bookingPaymentStatus = "refund_failed";
-    eventType = "refund_failed";
-  } else {
+  if (!attempt) {
+    const pit = await prisma.flightPaymentIntentRecord.findFirst({
+      where: { order_failure_refund_id: id },
+    });
+    if (pit) {
+      await applyCompensationRefundRemoteStatus({
+        pit,
+        remote,
+        source: { webhook_event_type: type },
+      });
+      logger.info("Duffel compensation refund webhook applied", {
+        duffel_refund_id: id,
+        pit_id: pit.duffel_intent_id,
+      });
+    }
     return;
   }
 
-  await prisma.$transaction([
-    prisma.flightPaymentRefundAttempt.update({
-      where: { id: attempt.id },
-      data: {
-        status: attemptStatus,
-        raw: obj as unknown as Prisma.InputJsonValue,
-        error_code:
-          attemptStatus === "failed" ? "DUFFEL_REFUND_FAILED" : null,
-      },
-    }),
-    prisma.booking.update({
-      where: { id: attempt.booking_id },
-      data: { payment_status: bookingPaymentStatus },
-    }),
-  ]);
+  if (!attempt.booking) return;
 
-  try {
-    await bookingFinancialEventRepository.record({
-      type: eventType,
+  const oc = await prisma.flightOrderCancellation.findUnique({
+    where: { id: attempt.flight_order_cancellation_id },
+  });
+
+  await applyCancellationRefundRemoteStatus({
+    attempt: {
+      id: attempt.id,
+      status: attempt.status,
       booking_id: attempt.booking_id,
+      flight_order_cancellation_id: attempt.flight_order_cancellation_id,
       flight_payment_intent_record_id: attempt.flight_payment_intent_record_id,
       amount: attempt.amount,
       currency: attempt.currency,
-      payload: {
-        webhook_event_type: type,
-        duffel_refund_id: id,
-        refund_status: remoteStatus,
-      } as Prisma.InputJsonValue,
-    });
-  } catch {
-    // best-effort
-  }
+      duffel_refund_id: attempt.duffel_refund_id,
+    },
+    bookingTotalAmount: attempt.booking.total_amount,
+    refundAmountQuoted: oc?.refund_amount ?? attempt.amount,
+    remote,
+    source: { webhook_event_type: type },
+  });
 
   logger.info("Duffel refund webhook applied", {
     duffel_refund_id: id,
     booking_id: attempt.booking_id,
-    error_code: bookingPaymentStatus,
   });
 }
 
@@ -356,7 +367,7 @@ export async function applyDuffelWebhookEventSideEffects(payload: Record<string,
   }
 
   let order = embedded;
-  if (typeof embedded.total_amount !== "string") {
+  if (orderNeedsFreshFetch(order)) {
     try {
       const fresh = await getDuffelOrder(embedded.id);
       const data = unwrapDuffelOrderResponse(fresh);
@@ -379,29 +390,11 @@ export async function applyDuffelWebhookEventSideEffects(payload: Record<string,
   });
 
   if (isOrderCancelledInDuffelOrder(order)) {
-    const bookingRow = await prisma.booking.findUnique({
-      where: { id: fb.booking_id },
-      select: { status: true, payment_status: true },
-    });
-    if (bookingRow?.status === "cancelled") {
-      return;
-    }
-    const terminalPaymentStatuses = new Set([
-      "refunded",
-      "partially_refunded",
-      "credit_issued",
-      "refund_failed",
-      "refund_processing",
-    ]);
-    const keepPaymentStatus =
-      bookingRow?.payment_status != null && terminalPaymentStatuses.has(bookingRow.payment_status);
-
-    await prisma.booking.update({
-      where: { id: fb.booking_id },
-      data: {
-        status: "cancelled",
-        ...(keepPaymentStatus ? {} : { payment_status: "refund_processing" }),
-      },
+    await reconcileExternalOrderCancellation({
+      flightBookingRowId: fb.id,
+      bookingId: fb.booking_id,
+      duffelOrderId: order.id as string,
+      order,
     });
   }
 }

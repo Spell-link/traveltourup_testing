@@ -28,6 +28,8 @@ describe("mapDuffelOfferToDto", () => {
     expect(dto.slices[0].segments[0].cabin_class).toBe("economy");
     expect(dto.passengers).toEqual([{ id: "pas_test_adult_1", type: "adult" }]);
     expect(dto.available_services).toEqual([]);
+    expect(dto.passenger_identity_documents_required).toBe(false);
+    expect(dto.supported_passenger_identity_document_types).toEqual([]);
   });
 
   it("accepts bare offer object without data wrapper", () => {
@@ -41,6 +43,8 @@ describe("mapDuffelOfferToDto", () => {
     expect(dto.slices).toEqual([]);
     expect(dto.passengers).toEqual([]);
     expect(dto.available_services).toEqual([]);
+    expect(dto.passenger_identity_documents_required).toBe(false);
+    expect(dto.supported_passenger_identity_document_types).toEqual([]);
   });
 
   it("throws on invalid payload", () => {

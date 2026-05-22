@@ -9,7 +9,22 @@ import { Link, usePathname } from "@/i18n/navigation";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Moon, Sun, Palette, ChevronDown, Phone, Mail, Menu, X, LogOut, User as UserIcon, Shield } from "lucide-react";
+import {
+  Moon,
+  Sun,
+  Palette,
+  ChevronDown,
+  Phone,
+  Mail,
+  X,
+  LogOut,
+  User as UserIcon,
+  Shield,
+  Plane,
+  Car,
+  Building2,
+  LayoutGrid,
+} from "lucide-react";
 
 import { useTheme } from "@/components/ThemeProvider";
 import { ThemeSelector } from "@/components/ThemeSelector";
@@ -93,6 +108,20 @@ const NAV_MAIN_KEYS: Record<string, string> = {
 };
 
 const ADMIN_ROLE_IDS: ReadonlySet<string> = new Set(["super_admin", "admin"]);
+
+const MOBILE_BOTTOM_TABS = [
+  { href: "/flights" as const, labelKey: "flights" as const, Icon: Plane },
+  { href: "/hotels" as const, labelKey: "hotels" as const, Icon: Building2 },
+  { href: "/cars" as const, labelKey: "cars" as const, Icon: Car },
+] as const;
+
+const mobileBottomTabClass = (active: boolean) =>
+  cn(
+    "flex flex-col items-center justify-center gap-px rounded-xl  px-1 py-1.5 transition-colors duration-200",
+    active
+      ? "bg-primary/10 text-primary"
+      : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+  );
 
 function useMarketingUserMenu(user: User | null) {
   const userId = user?.id ?? null;
@@ -305,7 +334,7 @@ export default function Navbar() {
       </div>
 
       {/* Main navigation bar */}
-      <nav className="w-full bg-muted shadow-sm border-b border-border sticky top-0 z-50">
+      <nav className="w-full bg-muted shadow-sm border-b border-border static sm:sticky sm:none top-0 z-50">
         <div className="container mx-auto px-4 md:px-10">
           <div className="flex justify-between items-center h-14 lg:h-[80px]">
             <Link href="/" className="flex-shrink-0">
@@ -493,14 +522,29 @@ export default function Navbar() {
                 )}
               </div>
 
-              <button
-                onClick={() => setMobileOpen((o) => !o)}
-                className="lg:hidden p-2.5 rounded-xl bg-muted hover:bg-muted/80 text-foreground transition-colors"
-                aria-label={tNav("toggleMenu")}
-                aria-expanded={mobileOpen}
+              <Link
+                href={isSignedIn ? "/profile" : "/login"}
+                className="lg:hidden shrink-0 rounded-xl p-1 transition-colors hover:bg-muted/80"
+                aria-label={isSignedIn ? tNav("profile") : tNav("login")}
               >
-                {mobileOpen ? <X className="w-6 h-6" strokeWidth={2} /> : <Menu className="w-6 h-6" strokeWidth={2} />}
-              </button>
+                {isSignedIn ? (
+                  <Avatar className="h-10 w-10 ring-2 ring-primary/15 transition hover:ring-primary/35">
+                    {userMenu.avatarSrc ? (
+                      <AvatarImage
+                        src={userMenu.avatarSrc}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className="object-cover"
+                      />
+                    ) : null}
+                    <AvatarFallback className="text-xs font-semibold">{userMenu.initials}</AvatarFallback>
+                  </Avatar>
+                ) : (
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-foreground">
+                    <UserIcon className="h-5 w-5" strokeWidth={2} />
+                  </span>
+                )}
+              </Link>
             </div>
           </div>
         </div>
@@ -664,7 +708,7 @@ export default function Navbar() {
                               {tNav("profile")}
                             </span>
                           </Link>
-                          {userMenu.isAdmin && (
+                          {/* {userMenu.isAdmin && (
                             <NextLink
                               href="/admin"
                               onClick={() => setMobileOpen(false)}
@@ -674,7 +718,7 @@ export default function Navbar() {
                                 {tNav("adminPanel")}
                               </span>
                             </NextLink>
-                          )}
+                          )} */}
                           <form action={signOutAction} className="min-w-0 flex-1">
                             <button
                               type="submit"
@@ -714,6 +758,40 @@ export default function Navbar() {
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      {/* Mobile bottom tab bar — All Services reuses setMobileOpen (former hamburger) */}
+      <nav
+        className="lg:hidden fixed inset-x-0 bottom-0 z-50 border-t border-border bg-muted/95 backdrop-blur-md rounded-t-2xl supports-[backdrop-filter]:bg-muted/80 pb-[max(env(safe-area-inset-bottom))]"
+        aria-label={tNav("navigationSection")}
+      >
+        <div className="grid grid-cols-4">
+          {MOBILE_BOTTOM_TABS.map(({ href, labelKey, Icon }) => {
+            const active = isNavActive(href, pathname);
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setMobileOpen(false)}
+                className={mobileBottomTabClass(active)}
+                aria-current={active ? "page" : undefined}
+              >
+                <Icon className="h-7 w-7 shrink-0" strokeWidth={active ? 2.25 : 2} />
+                <span className="text-[12px] font-semibold leading-tight">{tNav(labelKey)}</span>
+              </Link>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMobileOpen((o) => !o)}
+            className={mobileBottomTabClass(mobileOpen)}
+            aria-label={tNav("allServices")}
+            aria-expanded={mobileOpen}
+          >
+            <LayoutGrid className="h-5 w-5 shrink-0" strokeWidth={mobileOpen ? 2.25 : 2} />
+            <span className="text-[10px] font-semibold leading-tight">{tNav("allServices")}</span>
+          </button>
+        </div>
+      </nav>
     </>
   );
 }

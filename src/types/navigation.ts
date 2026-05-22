@@ -36,8 +36,8 @@ export interface BreadcrumbItem {
 }
 
 export interface FooterContact {
-  address: string;
-  addressLine2?: string;
+  // address: string;
+  // addressLine2?: string;
   phone: string;
   email: string;
 }

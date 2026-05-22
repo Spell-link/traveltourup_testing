@@ -28,27 +28,25 @@ export default async function AdminFlightPricingRuleEditPage({
           name: rule.name,
           enabled: rule.enabled,
           priority: rule.priority,
-          origin_iata: rule.origin_iata,
-          destination_iata: rule.destination_iata,
-          carrier_iata: rule.carrier_iata,
+          origin_iata: rule.origin_iata ?? "",
+          destination_iata: rule.destination_iata ?? "",
+          carrier_iata: rule.carrier_iata ?? "",
           cabin_class:
             rule.cabin_class === "economy" ||
             rule.cabin_class === "premium_economy" ||
             rule.cabin_class === "business" ||
             rule.cabin_class === "first"
               ? rule.cabin_class
-              : null,
+              : "",
           commission_percent_override:
-            rule.commission_percent_override == null
-              ? null
-              : Number(rule.commission_percent_override),
-          markup_fixed_override: rule.markup_fixed_override,
+            rule.commission_percent_override == null ? "" : String(rule.commission_percent_override),
+          markup_fixed_override: rule.markup_fixed_override ?? "",
           max_commission_percent:
-            rule.max_commission_percent == null ? null : Number(rule.max_commission_percent),
-          max_markup_fixed: rule.max_markup_fixed,
-          effective_from: rule.effective_from,
-          effective_to: rule.effective_to,
-          notes: rule.notes,
+            rule.max_commission_percent == null ? "" : String(rule.max_commission_percent),
+          max_markup_fixed: rule.max_markup_fixed ?? "",
+          effective_from: rule.effective_from ?? "",
+          effective_to: rule.effective_to ?? "",
+          notes: rule.notes ?? "",
         }}
       />
     </div>

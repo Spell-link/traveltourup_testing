@@ -1,6 +1,5 @@
 "use client";
 import React, { useState, useEffect, useMemo } from "react";
-import Image from "next/image";
 import { useLocale, useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
@@ -54,14 +53,14 @@ function HeroSection() {
       icon: <Plane className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={2} />,
     },
     {
-      id: "cars",
-      label: t("tabCars"),
-      icon: <Car className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={2} />,
-    },
-    {
       id: "hotels",
       label: t("tabHotels"),
       icon: <Building2 className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={2} />,
+    },
+    {
+      id: "cars",
+      label: t("tabCars"),
+      icon: <Car className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={2} />,
     },
     {
       id: "more",
@@ -71,65 +70,79 @@ function HeroSection() {
   ];
 
   return (
-    <div className="relative w-full bg-muted">
+    <div className="relative w-full bg-muted/60">
       {/* Hero background - Next/Image with priority for LCP optimization */}
       <div
         className={cn(
-          "relative flex min-h-[420px] w-full flex-col justify-center pt-16 pb-24 md:min-h-[480px] md:pt-20 md:pb-28",
+          "relative flex w-full flex-col justify-center overflow-hidden",
+          "min-h-[min(48vh,360px)] sm:min-h-[400px] md:min-h-[480px]",
+          "pt-8 pb-20 sm:pt-12 sm:pb-24 md:pt-20 md:pb-28",
+          "[clip-path:ellipse(150%_100%_at_50%_0%)] md:[clip-path:ellipse(120%_100%_at_50%_0%)]",
           isRtlLocale(locale) ? "items-end" : "items-center",
         )}
-        style={{ clipPath: "ellipse(120% 100% at 50% 0%)" }}
       >
-        <Image
-          src="/images/featured/background.png"
-          alt=""
-          fill
-          priority
-          quality={80}
-          sizes="100vw"
-          className="object-cover"
-          style={{ objectPosition: "center" }}
-        />
-        <div
-          className="absolute inset-0 bg-[var(--color-hero-overlay)] mix-blend-multiply"
-          aria-hidden
-        />
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          <video
+            autoPlay
+            muted
+            loop
+            playsInline
+            ref={(el) => {
+              if (el) el.playbackRate = 0.6;
+            }}
+        
+            className="
+              absolute inset-0
+             h-full w-full
+              object-cover
+              object-[50%_62%]P
+               scale-[1.34]
+              sm:object-[50%_58%]
+               sm:scale-[1.2]
+                md:object-center
+                md:scale-100
+            "
+          >
+            <source src="/videos/bgVideo.mp4" type="video/mp4" />
+          </video>
+          {/* <div className="absolute inset-0 bg-primary/60" /> */}
+        </div>
 
         {/* Content */}
-        <div className="relative z-10 container mx-auto px-3 sm:px-4 max-w-7xl">
+        <div className="relative z-10 w-full container mx-auto px-4 sm:px-4 max-w-7xl">
           <div dir={rtlDirProp(locale)} className={rtlTypographyClass(locale)}>
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-white mb-2 drop-shadow-sm">
+            <h1 className="text-2xl leading-tight sm:text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-2 drop-shadow-sm">
               {t("headlinePrefix")}{" "}
-              <span className="inline-block italic font-extrabold ps-1" style={{verticalAlign: "bottom" }}>
+              <span className="inline-block italic font-extrabold ps-1" style={{ verticalAlign: "bottom" }}>
                 <span
                   key={wordIndex}
-                  className={`inline-block  drop-shadow-md ${
-                    animState === "enter" ? "hero-word-enter" : "hero-word-exit"
-                  }`}
+                  className={`inline-block drop-shadow-md ${animState === "enter" ? "hero-word-enter" : "hero-word-exit"
+                    }`}
                 >
                   {rotatingWords[wordIndex]}
                 </span>
               </span>
             </h1>
-            <p className="text-2xl text-white/95 mb-6">{t("tagline")}</p>
+            <p className="text-sm sm:text-lg md:text-2xl text-white/95 mb-4 sm:mb-6 max-w-xl">
+              {t("tagline")}
+            </p>
           </div>
         </div>
       </div>
 
       {/* Tabs container - positioned to overlap curved edge */}
-      <div className="relative z-20 -mt-20 md:-mt-36 container mx-auto px-3 sm:px-4 pb-6">
+      <div className="relative z-20 -mt-16 sm:-mt-20 md:-mt-36 container mx-auto px-3 sm:px-4 pb-6">
         <div className="max-w-7xl mx-auto bg-background rounded-xl shadow-xl border border-border/50">
           {/* Tab Headers - Same for both mobile and desktop */}
-            <div className="grid grid-cols-4 md:flex border-b border-border">
+          <div className="grid grid-cols-4 md:flex border-b border-border">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1 sm:gap-2 py-2.5 px-2.5 sm:py-4 sm:px-6 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 ${
-                  activeTab === tab.id
-                    ? "border-primary text-primary bg-primary/10 rounded-t-lg -mb-px"
-                    : "border-transparent text-foreground hover:text-primary hover:bg-muted"
-                }`}
+                className={`flex items-center gap-1 sm:gap-2 py-2.5 px-2.5 sm:py-4 sm:px-6 text-xs sm:text-sm font-semibold border-b-2 transition-all duration-200 ${activeTab === tab.id
+                  ? "border-primary text-primary bg-primary/10 rounded-t-lg -mb-px"
+                  : "border-transparent text-foreground hover:text-primary hover:bg-muted"
+                  }`}
               >
                 <div className="text-primary">{tab.icon}</div>
                 <span
@@ -157,8 +170,8 @@ function HeroSection() {
                 setShowTravelerDropdown={setShowTravelerDropdown}
               />
             )}
-            {activeTab === "cars" && <CarsTab />}
             {activeTab === "hotels" && <HotelsTab />}
+            {activeTab === "cars" && <CarsTab />}
             {activeTab === "more" && <MoreServicesTab />}
           </div>
         </div>

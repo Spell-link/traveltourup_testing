@@ -14,6 +14,26 @@ import {
 } from "@/lib/services/flights/flight-ancillaries.service";
 import { resolveFlightPricingConfigForOffer } from "@/lib/services/flights/flight-pricing-rule.service";
 import type { FlightOrderServiceLine } from "@/lib/validations/flight-ancillaries.schema";
+import type { FlightPaymentsResolvedConfig } from "@/config/flight-payments.config";
+import type { DuffelIntentPriceBreakdown } from "@/lib/payments/duffel-intent-pricing";
+
+function pitPricingSnapshotFields(
+  breakdown: DuffelIntentPriceBreakdown,
+  cfg: FlightPaymentsResolvedConfig & { applied_rule_id?: string | null },
+) {
+  const charge = Number.parseFloat(breakdown.charge_amount);
+  const subtotal = Number.parseFloat(breakdown.subtotal_charged);
+  const feeAmount = (Math.round((charge - subtotal) * 100) / 100).toFixed(2);
+  return {
+    subtotal_charged_amount: breakdown.subtotal_charged,
+    duffel_payments_fee_amount: feeAmount,
+    duffel_payments_fee_rate: String(cfg.duffelPaymentsFeeRate),
+    fx_rate_applied: String(cfg.fxRateToCustomerCurrency),
+    commission_percent_applied: String(cfg.commissionPercent),
+    markup_fixed_applied: cfg.markupFixed,
+    applied_pricing_rule_id: cfg.applied_rule_id ?? null,
+  };
+}
 
 function serializeRecord(row: {
   duffel_intent_id: string;
@@ -70,6 +90,7 @@ export async function createFlightCheckoutPaymentIntent(input: {
     offerId: input.offerId,
     services: input.services,
     offerTotalCurrency: offer.total_currency,
+    preloadedOffer: offer,
   });
   if (priced.currency !== offer.total_currency) {
     throw new AppError(400, "Extras currency does not match offer.", "VALIDATION_ERROR");
@@ -98,6 +119,11 @@ export async function createFlightCheckoutPaymentIntent(input: {
     throw new AppError(502, "Invalid payment intent from supplier.", "PAYMENT_INTENT_INVALID");
   }
 
+  const snapshot = pitPricingSnapshotFields(breakdown, cfg);
+  const duffelCost = (
+    Number.parseFloat(breakdown.offer_total) + Number.parseFloat(priced.servicesSubtotal)
+  ).toFixed(2);
+
   const persisted = await flightPaymentIntentRepository.create({
     duffel_intent_id: pit.id,
     offer_id: offer.id,
@@ -107,6 +133,7 @@ export async function createFlightCheckoutPaymentIntent(input: {
     offer_currency: breakdown.offer_currency,
     markup_amount: breakdown.markup_amount,
     services_subtotal_amount: priced.servicesSubtotal,
+    ...snapshot,
     ...(priced.orderServices.length > 0
       ? { ancillary_selection: priced.orderServices as unknown as Prisma.InputJsonValue }
       : {}),
@@ -127,6 +154,10 @@ export async function createFlightCheckoutPaymentIntent(input: {
         offer_total: breakdown.offer_total,
         services_subtotal: priced.servicesSubtotal,
         markup_amount: breakdown.markup_amount,
+        customer_paid: breakdown.charge_amount,
+        duffel_cost: duffelCost,
+        duffel_payment_fee: snapshot.duffel_payments_fee_amount,
+        commission: breakdown.markup_amount,
         applied_pricing_rule_id: cfg.applied_rule_id,
         applied_pricing_rule_name: cfg.applied_rule_name,
         commission_percent_applied: cfg.commissionPercent,

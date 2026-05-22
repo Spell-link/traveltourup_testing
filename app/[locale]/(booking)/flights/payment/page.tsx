@@ -6,6 +6,10 @@ import { localizedCustomerPath } from "@/i18n/locale-path";
 import type { AppLocale } from "@/i18n/routing";
 import { safeInternalPath } from "@/lib/auth/redirect";
 import { getServerAuthz } from "@/lib/authz/session";
+import { prisma } from "@/lib/prisma";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { formatDuffelPhone } from "@/lib/validations/phone.schema";
+import type { FlightCheckoutContactPrefill } from "@/components/flights/FlightCheckoutDuffel";
 
 export async function generateMetadata({
   params,
@@ -32,6 +36,31 @@ function buildFlightsPaymentPath(sp: Record<string, string | string[] | undefine
   return qs ? `/flights/payment?${qs}` : "/flights/payment";
 }
 
+async function loadCheckoutContactPrefill(userId: string): Promise<FlightCheckoutContactPrefill | null> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const profile = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { phone: true, phone_country_code: true },
+  });
+
+  const email = user?.email?.trim() || null;
+  let phone_number: string | null = null;
+  const rawPhone = profile?.phone?.trim() ?? "";
+  if (rawPhone) {
+    phone_number = formatDuffelPhone(rawPhone);
+    if (!phone_number && profile?.phone_country_code) {
+      phone_number = formatDuffelPhone(`${profile.phone_country_code}${rawPhone}`);
+    }
+  }
+
+  if (!email && !phone_number) return null;
+  return { email, phone_number };
+}
+
 export default async function Page({
   params,
   searchParams,
@@ -53,5 +82,7 @@ export default async function Page({
     redirect(`/${locale}/login?next=${encodeURIComponent(returnPath)}`);
   }
 
-  return <Payment />;
+  const contactPrefill = await loadCheckoutContactPrefill(userId);
+
+  return <Payment contactPrefill={contactPrefill} />;
 }

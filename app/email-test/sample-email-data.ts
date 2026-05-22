@@ -13,10 +13,21 @@ export function sampleDataForEmail(type: EmailType, subType: EmailBookingSubType
       return {
         bookingReference: "TTU-TEST-001",
         guestName: "Test Traveler",
-        destination: subType === EmailBookingSubType.hotel ? "Kyoto" : subType === EmailBookingSubType.car ? "LAX" : "Tokyo",
-        dates: "May 1–7, 2026",
-        total: "USD 1,200.00",
-        manageUrl: "https://traveltourup.com/bookings",
+        destination:
+          subType === EmailBookingSubType.hotel
+            ? "Kyoto"
+            : subType === EmailBookingSubType.car
+              ? "LAX"
+              : "LHR → JFK",
+        dates: "Departure: Mon, May 18, 2026, 10:00 AM\nReturn: Mon, May 25, 2026, 3:00 PM",
+        total: "USD 406.82",
+        manageUrl: "https://traveltourup.com/profile/bookings/sample-booking-id",
+        airlineRecordLocator: subType === EmailBookingSubType.flight ? "X9ABC1" : undefined,
+        passengersSummary: "Test Traveler",
+        statusNote:
+          subType === EmailBookingSubType.flight
+            ? "Your payment was received. Your itinerary and booking references below match what you booked."
+            : undefined,
       };
     case EmailType.paymentConfirmation:
       return {
@@ -32,8 +43,12 @@ export function sampleDataForEmail(type: EmailType, subType: EmailBookingSubType
       return {
         bookingReference: "TTU-TEST-001",
         guestName: "Test Traveler",
-        summary: "Sample cancellation — test email",
-        manageUrl: "https://traveltourup.com/bookings",
+        summary:
+          "If you did not request this cancellation, contact us immediately at support@traveltourup.com with your booking reference.",
+        manageUrl: "https://traveltourup.com/profile/bookings/sample-booking-id",
+        airlineRecordLocator: "X9ABC1",
+        refundAmountDisplay: "USD 218.58",
+        refundTo: "original_form_of_payment",
       };
     case EmailType.refund:
       return {

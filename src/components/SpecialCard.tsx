@@ -75,22 +75,21 @@ const SpecialCard = () => {
             </div>
           </div>
 
-          {/* Center big image */}
-          <div className="row-span-1 relative group overflow-hidden rounded-xl">
-            <Image
-              src="/images/categories/category3.jpg"
-              alt={imgAlt}
-              width={800}
-              height={600}
+        
+          <div className="row-span-1 relative group overflow-hidden rounded-xl h-[320px] md:h-full">
+            <video
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="auto"
               className="h-full w-full object-cover rounded-xl transition-transform duration-300 group-hover:scale-110"
-            />
-  
-            <div className="absolute top-4 start-4 bg-black/40 backdrop-blur-sm text-white px-4 py-3 rounded-lg">
-              <h3 className="font-semibold text-lg">{names.destIceland}</h3>
-              <p className="text-sm">{priceFrom(2)}</p>
-            </div>
-          </div>
+            >
+              <source src="/videos/winterSpecial.mp4" type="video/mp4" />
+            </video>
 
+         
+          </div>
           {/* Right column */}
           <div className="grid grid-cols-2 md:grid-cols-1 grid-rows-1 md:grid-rows-2 gap-4">
             <div className="relative group overflow-hidden rounded-xl">

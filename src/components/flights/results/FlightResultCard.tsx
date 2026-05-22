@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, memo } from "react";
 import { Link } from "@/i18n/navigation";
 import {
   Star,
@@ -36,6 +36,8 @@ export type FlightResultCardProps = {
   /** When set, primary CTA is a button (e.g. outbound cluster pick) instead of navigation. */
   onSelect?: () => void;
   hideComparison?: boolean;
+  /** Order-change flow: show delta pricing instead of full fare. */
+  changeDelta?: number;
 };
 
 function formatSliceDateTime(isoDate: string | null | undefined, timeHHmm: string): string {
@@ -52,7 +54,7 @@ function formatSliceDateTime(isoDate: string | null | undefined, timeHHmm: strin
   });
 }
 
-export function FlightResultCard({
+export const FlightResultCard = memo(function FlightResultCard({
   flight,
   variant = "list",
   comparison,
@@ -60,8 +62,10 @@ export function FlightResultCard({
   selectHref,
   onSelect,
   hideComparison = false,
+  changeDelta,
 }: FlightResultCardProps) {
   const tc = useTranslations("Common");
+  const tChange = useTranslations("Flights.change");
   const locale = useLocale();
   const { formatPrice } = useCurrency();
   const isGrid = variant === "grid";
@@ -70,6 +74,19 @@ export function FlightResultCard({
   const href =
     selectHref ??
     (flight.id.startsWith("cluster:") ? null : `/flights/${flight.id}`);
+
+  const priceLabel =
+    changeDelta !== undefined
+      ? changeDelta < 0
+        ? tChange("refundAmount", {
+            amount: formatPrice(Math.abs(changeDelta), flight.currency || "USD", locale),
+          })
+        : changeDelta === 0
+          ? tChange("noExtraCharge")
+          : tChange("additionalCost", {
+              amount: formatPrice(changeDelta, flight.currency || "USD", locale),
+            })
+      : formatPrice(flight.price, flight.currency || "USD", locale);
 
   const logoUrl = flight.airlineLogoUrl;
   const firstSeg = flight.segmentDetails?.[0];
@@ -368,7 +385,7 @@ export function FlightResultCard({
         >
           <div className="text-right mb-2">
             <div className={`font-bold text-primary ${isGrid ? "text-2xl" : "text-3xl"}`}>
-              {formatPrice(flight.price, flight.currency || "USD", locale)}
+              {priceLabel}
             </div>
             <div className="text-muted-foreground text-sm">{priceSubtitle}</div>
           </div>
@@ -390,12 +407,14 @@ export function FlightResultCard({
               </button>
             </Link>
           ) : null}
-          <div className="text-success text-sm text-right mt-2">
-            <Check className="inline mr-1" />
-            {tc("freeCancellation")}
-          </div>
+          {changeDelta === undefined ? (
+            <div className="text-success text-sm text-right mt-2">
+              <Check className="inline mr-1" />
+              {tc("freeCancellation")}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
   );
-}
+});

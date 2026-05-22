@@ -18,11 +18,9 @@ const PROFILE_AVATAR_API = "/api/v1/users/me/avatar";
 const SIDEBAR_ITEMS = [
   "My Profile",
   "My Orders",
-  "My Reviews",
+  // "My Reviews",
   "Wishlist",
-  "Returns & Refunds",
-  "Credit & Debit",
-  "Gift Cards",
+  // "Gift Cards",
 ] as const;
 
 type SidebarKey = (typeof SIDEBAR_ITEMS)[number];
@@ -74,30 +72,30 @@ export function ProfileDashboard({
 
   return (
     <div className="bg-muted/40 sm:py-8 md:py-12">
-      <div className="container mx-auto max-w-7xl sm:px-4">
+      <div className="container mx-auto sm:px-8">
         <div className="flex flex-col overflow-hidden sm:rounded-2xl sm:border border-border bg-card shadow-lg lg:flex-row">
           <aside
             className={cn(
-              "w-full shrink-0 border-border bg-muted/50 p-5 lg:w-[280px] lg:border-r",
+              "w-full shrink-0 border-border bg-muted/50 p-4 lg:w-[280px] lg:border-r",
               mobileShowsContent && "hidden md:block",
             )}
           >
             <h2 className="font-heading text-lg font-semibold text-foreground">Your account</h2>
 
-            <div className="mt-6 flex sm:flex-col sm:items-center ">
+            <div className="mt-4 md:mt-6 flex sm:flex-col sm:items-center ">
               <SidebarAvatar
                 displayName={displayNameFrom(profile, email)}
                 profile={profile}
                 oauthAvatarUrl={oauthAvatarUrl}
               />
-              <div className="flex flex-col px-6 sm:text-center">
+              <div className="flex flex-col px-4 md:px-6 sm:text-center">
 
               <p className="mt-3 font-semibold text-foreground">{displayNameFrom(profile, email)}</p>
               <p className="text-xs text-muted-foreground break-all">{email ?? "—"}</p>
               </div>
             </div>
 
-            <nav className="mt-6 space-y-2" aria-label="Account sections">
+            <nav className="mt-4 md:mt-6 space-y-2" aria-label="Account sections">
               {SIDEBAR_ITEMS.map((item) => (
                 <button
                   key={item}
@@ -116,9 +114,18 @@ export function ProfileDashboard({
                   {item}
                 </button>
               ))}
+              <Link
+                href="/profile/flight-activity"
+                className={cn(
+                  "block w-full rounded-xl px-4 py-2.5 text-left text-sm font-medium transition",
+                  "border border-border bg-background text-foreground hover:bg-muted",
+                )}
+              >
+                Flight payments & refunds
+              </Link>
             </nav>
 
-            <form action={signOutAction} className="mt-6">
+            <form action={signOutAction} className="mt-2 md:mt-4">
               <button
                 type="submit"
                 className="w-full rounded-xl border border-border bg-background py-2.5 text-sm font-medium text-foreground transition hover:bg-muted"
@@ -130,7 +137,7 @@ export function ProfileDashboard({
 
           <div
             className={cn(
-              "min-h-[420px] flex-1 bg-background p-6 sm:p-6 md:p-8",
+              "min-h-[420px] flex-1 bg-muted p-4 sm:p-6 md:p-8",
               !mobileShowsContent && "hidden md:block",
             )}
           >
@@ -406,7 +413,7 @@ function ProfilePanel({
         Manage your personal information and preferences.
       </p>
 
-      <div className="sm:mt-4 sm:rounded-2xl sm:border border-border/35  sm:p-6 sma:shadow-sm">
+      <div>
        
 
         <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -439,14 +446,17 @@ function ProfilePanel({
        
       
         
-       
+          <div className="col-span-2"> 
           <Input
             label="Date of birth"
             name="dob"
             placeholder="mm/dd/yyyy"
             value={dob}
+            type="date"
             onChange={(e: ChangeEvent<HTMLInputElement>) => setDob(e.target.value)}
           />
+          </div>
+          
       
       
         </div>

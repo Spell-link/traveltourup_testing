@@ -3,7 +3,8 @@ import "server-only";
 import { Suspense } from "react";
 import { getCachedFeaturedFlightCards } from "@/lib/services/flights/featured-flights.service";
 import { FeaturedFlightsShell } from "@/components/flights/FeaturedFlightsShell";
-import { FeaturedFlightsGrid, FeaturedFlightsGridSkeleton } from "@/components/flights/FeaturedFlightsGrid";
+import { FeaturedFlightsGridSkeleton } from "@/components/flights/FlightSkeletons";
+import { FeaturedFlightsGrid } from "@/components/flights/FeaturedFlightsGrid";
 
 type Props = { bgColor?: string };
 

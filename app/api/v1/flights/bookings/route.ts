@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { handleApiError } from "@/lib/api/error-handler";
 import { AppError, ValidationError } from "@/lib/api/errors";
 import { successResponse } from "@/lib/api/response";
@@ -12,6 +12,7 @@ import {
   createDuffelInstantFlightBooking,
 } from "@/lib/services/flights/flights-booking.service";
 import { flightCheckoutBookingBodySchema } from "@/lib/validations/flight-checkout.schema";
+import { notifyFlightBookingConfirmed } from "@/lib/services/flights/flight-booking-notify.service";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,15 @@ export async function POST(req: NextRequest) {
             body: parsed.data,
             idempotencyKey: idem,
           });
+
+    const bookingId = typeof booking.id === "string" ? booking.id : null;
+    if (bookingId) {
+      after(() => {
+        void notifyFlightBookingConfirmed(bookingId).catch((err) => {
+          log.warn("Flight booking confirmation job failed", { error: String(err) });
+        });
+      });
+    }
 
     return withCorrelationHeader(successResponse(booking, 201), requestId);
   } catch (e) {

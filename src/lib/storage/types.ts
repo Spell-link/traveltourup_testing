@@ -32,6 +32,6 @@ export type StorageVariantConfig = {
 };
 
 /** Extend this tuple when adding variants; keep `registry` and Zod in sync. */
-export const STORAGE_VARIANT_IDS = ["blog-images", "user-avatar"] as const;
+export const STORAGE_VARIANT_IDS = ["blog-images", "user-avatar", "flight-tickets"] as const;
 
 export type StorageVariantId = (typeof STORAGE_VARIANT_IDS)[number];

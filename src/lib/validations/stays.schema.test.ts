@@ -38,19 +38,21 @@ describe("staysQuoteBodySchema", () => {
 
 describe("staysBookingBodySchema", () => {
   it("requires E.164 phone", () => {
-    const bad = staysBookingBodySchema.safeParse({
+    const base = {
       quote_id: "quo_0000AS0NZdKjjnnHZmSUbI",
+      payment: { three_d_secure_session_id: "tds_test" },
       email: "a@b.com",
-      phone_number: "02080160509",
       guests: [{ given_name: "A", family_name: "B", born_on: "1990-01-01" }],
+    };
+    const bad = staysBookingBodySchema.safeParse({
+      ...base,
+      phone_number: "02080160509",
     });
     expect(bad.success).toBe(false);
 
     const good = staysBookingBodySchema.safeParse({
-      quote_id: "quo_0000AS0NZdKjjnnHZmSUbI",
-      email: "a@b.com",
+      ...base,
       phone_number: "+442080160509",
-      guests: [{ given_name: "A", family_name: "B", born_on: "1990-01-01" }],
     });
     expect(good.success).toBe(true);
   });

@@ -13,8 +13,8 @@ export function useDuffelAirportSuggest(
   return useDebouncedSuggestionFetch<AirportSuggestionDto>({
     open,
     query,
-    fetcher: async (q) => {
-      const r = await getFlightAirports({ q, limit: 22 });
+    fetcher: async (q, signal) => {
+      const r = await getFlightAirports({ q, limit: 22 }, { signal });
       return r.airports ?? [];
     },
   });

@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, RefreshCcw } from "lucide-react";
+import { Link } from "@/i18n/navigation";
 
 type SerializedFinancialEvent = {
   id: string;
@@ -12,25 +14,15 @@ type SerializedFinancialEvent = {
   created_at: string;
 };
 
-const EVENT_LABELS: Record<string, string> = {
-  intent_created: "Payment authorised",
-  intent_succeeded: "Payment captured",
-  intent_failed: "Payment failed",
-  order_placed: "Booking confirmed by airline",
-  order_failed: "Airline could not confirm — refund in progress",
-  refund_initiated: "Refund initiated",
-  refund_succeeded: "Refund completed",
-  refund_failed: "Refund failed",
-  cancel_quoted: "Cancellation quote requested",
-  cancel_confirmed: "Cancellation confirmed",
-  change_quoted: "Flight change quoted",
-  change_confirmed: "Flight change confirmed",
-};
-
 function formatRelative(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+function eventLabel(t: ReturnType<typeof useTranslations<"BookingMoney">>, type: string): string {
+  const key = `events.${type}` as const;
+  return t.has(key) ? t(key) : type;
 }
 
 /**
@@ -44,6 +36,7 @@ export function FlightFinancialTimelinePanel({
 }: {
   bookingId: string;
 }) {
+  const t = useTranslations("BookingMoney");
   const [events, setEvents] = useState<SerializedFinancialEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,13 +55,18 @@ export function FlightFinancialTimelinePanel({
       if (!res.ok || body.success === false) {
         throw new Error(("message" in body && body.message) || `HTTP ${res.status}`);
       }
-      setEvents(body.data.events);
+      const visible = body.data.events.filter(
+        (e) =>
+          e.type !== "change_quoted" ||
+          (Boolean(e.amount) && Boolean(e.currency)),
+      );
+      setEvents(visible);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load payment history.");
+      setError(e instanceof Error ? e.message : t("timelineLoadError"));
     } finally {
       setLoading(false);
     }
-  }, [bookingId]);
+  }, [bookingId, t]);
 
   useEffect(() => {
     void refresh();
@@ -79,23 +77,38 @@ export function FlightFinancialTimelinePanel({
   }
 
   return (
-    <section className="mt-6 rounded-2xl border border-border/60 bg-background p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-base font-semibold text-foreground">Payment timeline</h3>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:bg-muted disabled:opacity-50"
-        >
-          {loading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCcw className="h-3.5 w-3.5" />
-          )}
-          Refresh
-        </button>
+    <section
+      id="payments"
+      className="mt-6 rounded-2xl border border-border/60 bg-background p-4 sm:p-6"
+      aria-labelledby="flight-payment-timeline-heading"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h3 id="flight-payment-timeline-heading" className="text-base font-semibold text-foreground">
+          {t("paymentTimelineTitle")}
+        </h3>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/profile/flight-activity"
+            className="text-xs font-medium text-primary hover:underline"
+          >
+            {t("ledgerCta")}
+          </Link>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:bg-muted disabled:opacity-50"
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-3.5 w-3.5" />
+            )}
+            {t("refresh")}
+          </button>
+        </div>
       </div>
+      <p className="mt-2 text-xs text-muted-foreground">{t("ledgerCtaShort")}</p>
 
       {error ? (
         <p className="mt-3 text-sm text-destructive">{error}</p>
@@ -107,9 +120,7 @@ export function FlightFinancialTimelinePanel({
             <li key={e.id} className="relative">
               <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary/70" />
               <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-foreground">
-                  {EVENT_LABELS[e.type] ?? e.type}
-                </p>
+                <p className="text-sm font-medium text-foreground">{eventLabel(t, e.type)}</p>
                 <span className="text-xs text-muted-foreground">
                   {formatRelative(e.created_at)}
                 </span>

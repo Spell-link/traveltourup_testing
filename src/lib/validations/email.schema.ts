@@ -37,6 +37,14 @@ export const bookingConfirmationPropsSchema = z.object({
   total: z.string().min(1).max(80),
   manageUrl: z.string().url().optional(),
   productLabel: z.string().max(120).optional(),
+  /** Airline / GDS record locator when issued (flights). */
+  airlineRecordLocator: z.string().min(1).max(64).optional(),
+  /** Comma-separated traveler names. */
+  passengersSummary: z.string().min(1).max(500).optional(),
+  /** Short status line (e.g. payment received vs hold). */
+  statusNote: z.string().min(1).max(500).optional(),
+  /** When true, template may show attachment hint (PDF sent separately). */
+  itineraryAttached: z.boolean().optional(),
 });
 
 export const paymentReceiptPropsSchema = z.object({
@@ -52,8 +60,15 @@ export const paymentReceiptPropsSchema = z.object({
 export const cancelPropsSchema = z.object({
   bookingReference: z.string().min(1).max(120),
   guestName: z.string().min(1).max(200),
+  /** Optional short note (e.g. security). */
   summary: z.string().max(500).optional(),
   manageUrl: z.string().url().optional(),
+  /** GDS / airline record locator when known. */
+  airlineRecordLocator: z.string().min(1).max(64).optional(),
+  /** Amount quoted for this cancellation (display string, formatted server-side). */
+  refundAmountDisplay: z.string().min(1).max(80).optional(),
+  /** Duffel `refund_to` (e.g. `original_form_of_payment`, `airline_credits`). */
+  refundTo: z.string().min(1).max(120).optional(),
 });
 
 export const refundPropsSchema = z.object({

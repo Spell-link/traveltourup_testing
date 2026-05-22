@@ -8,6 +8,7 @@ import { FlightSliceTimePopover } from "@/components/flights/FlightSliceTimePopo
 import { Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { EditSearchSummaryCard } from "@/components/shared/EditSearchSummaryCard";
+import { formatMoneyDisplay } from "@/lib/currency/format-display";
 
 export const FLIGHT_SORT_IDS = [
   "best",
@@ -51,6 +52,7 @@ export type FlightResultsFilterSidebarProps = {
   /** When set, Duffel-style summary card is shown above filters (results layout only). */
   editSearchSummary?: { headline: string; lines: string[] } | null;
   onEditSearch?: () => void;
+  onFlightSearchStart?: () => void;
 };
 
 export function FlightResultsFilterSidebar({
@@ -77,6 +79,7 @@ export function FlightResultsFilterSidebar({
   onClearAll,
   editSearchSummary,
   onEditSearch,
+  onFlightSearchStart,
 }: FlightResultsFilterSidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isOpenStops, setIsOpenStops] = useState(false);
@@ -93,13 +96,15 @@ export function FlightResultsFilterSidebar({
     ? tStops(stopsMode)
     : tStops("label");
   return (
-    <div className="bg-card rounded-xl shadow-lg lg:p-6 lg:mb-0">
+    <div className="bg-card lg:mb-0 lg:rounded-xl lg:p-6 lg:shadow-lg">
       {editSearchSummary && onEditSearch ? (
         <EditSearchSummaryCard
           headline={editSearchSummary.headline}
           lines={editSearchSummary.lines}
           editLabel={tResults("editSearchButton")}
           onEdit={onEditSearch}
+          flightMobileFullscreenEdit
+          onFlightSearchStart={onFlightSearchStart}
         />
       ) : null}
       <div className="flex justify-between items-center mb-6">
@@ -157,7 +162,7 @@ export function FlightResultsFilterSidebar({
         <h3 className="font-bold mb-4 flex justify-between text-foreground">
           <span>{tFilters("price")}</span>
           <span className="text-primary tabular-nums">
-            {new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(priceMax)}
+            {formatMoneyDisplay(priceMax, "USD", "en-US")}
           </span>
         </h3>
         <input

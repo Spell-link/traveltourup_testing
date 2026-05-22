@@ -2,40 +2,42 @@ import "server-only";
 
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import type {
+  AdminFlightBookingListResult,
+  AdminFlightBookingRow,
+  AdminFlightSagaDetail,
+  AdminWebhookRow,
+} from "@/lib/admin/admin-flights.types";
+import { getAdminFlightBookingRevenueDetail } from "@/lib/services/admin/admin-flight-revenue.service";
 
-export type AdminFlightBookingRow = {
-  id: string;
-  booking_ref_no: string;
-  status: string;
-  payment_status: string;
-  total_amount: string;
-  currency: string;
-  duffel_order_id: string | null;
-  airline_pnr: string | null;
-  user_id: string | null;
-  user_name: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type AdminFlightBookingListResult = {
-  items: AdminFlightBookingRow[];
-  total: number;
-  page: number;
-  page_size: number;
-};
+export type {
+  AdminFlightBookingListResult,
+  AdminFlightBookingRow,
+  AdminFlightSagaDetail,
+  AdminWebhookRow,
+} from "@/lib/admin/admin-flights.types";
 
 const ALLOWED_STATUS = new Set(["pending", "confirmed", "cancelled", "failed"]);
 
+const BOOKING_SORT_FIELDS = {
+  created_at: "created_at",
+  booking_ref_no: "booking_ref_no",
+  status: "status",
+} as const;
+
 export async function listAdminFlightBookings(query: {
   page?: number;
-  page_size?: number;
+  limit?: number;
   status?: string;
   q?: string;
+  sort?: keyof typeof BOOKING_SORT_FIELDS;
+  order?: "asc" | "desc";
 }): Promise<AdminFlightBookingListResult> {
   const page = Math.max(1, query.page ?? 1);
-  const pageSize = Math.min(100, Math.max(10, query.page_size ?? 25));
-  const skip = (page - 1) * pageSize;
+  const limit = Math.min(100, Math.max(10, query.limit ?? 25));
+  const skip = (page - 1) * limit;
+  const sortField = query.sort && query.sort in BOOKING_SORT_FIELDS ? query.sort : "created_at";
+  const order = query.order === "asc" ? "asc" : "desc";
 
   const where: Prisma.BookingWhereInput = {
     type: "flight",
@@ -64,9 +66,9 @@ export async function listAdminFlightBookings(query: {
   const [rows, total] = await Promise.all([
     prisma.booking.findMany({
       where,
-      orderBy: { created_at: "desc" },
+      orderBy: { [sortField]: order },
       skip,
-      take: pageSize,
+      take: limit,
       include: {
         flightBooking: {
           select: {
@@ -101,66 +103,9 @@ export async function listAdminFlightBookings(query: {
     })),
     total,
     page,
-    page_size: pageSize,
+    limit,
   };
 }
-
-export type AdminFlightSagaDetail = {
-  booking: AdminFlightBookingRow & {
-    offer_id: string | null;
-    live_mode: boolean | null;
-    offer_expires_at: string | null;
-  };
-  payment_intents: Array<{
-    id: string;
-    duffel_intent_id: string;
-    status: string;
-    charge_amount: string;
-    charge_currency: string;
-    offer_amount: string;
-    offer_currency: string;
-    markup_amount: string;
-    booking_id: string | null;
-    order_failure_at: string | null;
-    order_failure_code: string | null;
-    order_failure_refund_id: string | null;
-    order_failure_refund_status: string | null;
-    created_at: string;
-    updated_at: string;
-  }>;
-  cancellations: Array<{
-    id: string;
-    duffel_cancellation_id: string;
-    duffel_order_id: string;
-    status: string;
-    refund_amount: string | null;
-    refund_currency: string | null;
-    refund_to: string | null;
-    quote_expires_at: string | null;
-    confirmed_at: string | null;
-    created_at: string;
-  }>;
-  refund_attempts: Array<{
-    id: string;
-    duffel_refund_id: string | null;
-    status: string;
-    amount: string | null;
-    currency: string | null;
-    error_code: string | null;
-    flight_payment_intent_record_id: string | null;
-    flight_order_cancellation_id: string;
-    created_at: string;
-    updated_at: string;
-  }>;
-  financial_events: Array<{
-    id: string;
-    type: string;
-    amount: string | null;
-    currency: string | null;
-    payload: unknown;
-    created_at: string;
-  }>;
-};
 
 export async function getAdminFlightSagaDetail(
   bookingId: string,
@@ -183,6 +128,8 @@ export async function getAdminFlightSagaDetail(
         orderBy: { created_at: "asc" },
       })
     : [];
+
+  const revenueDetail = await getAdminFlightBookingRevenueDetail(bookingId);
 
   return {
     booking: {
@@ -253,6 +200,9 @@ export async function getAdminFlightSagaDetail(
       payload: e.payload,
       created_at: e.created_at.toISOString(),
     })),
+    revenue: revenueDetail?.revenue ?? null,
+    reconciliation: revenueDetail?.reconciliation ?? [],
+    pit_revenue: revenueDetail?.pit ?? null,
   };
 }
 
@@ -326,38 +276,37 @@ export async function listAdminFlightOrphanPits(): Promise<{
   };
 }
 
-export type AdminWebhookRow = {
-  id: string;
-  event_id: string;
-  type: string;
-  received_at: string;
-  processed_at: string | null;
-  error: string | null;
-  payload: unknown;
-};
+const WEBHOOK_SORT_FIELDS = {
+  received_at: "received_at",
+  type: "type",
+} as const;
 
 export async function listAdminDuffelWebhooks(query: {
   page?: number;
-  page_size?: number;
+  limit?: number;
   type?: string;
+  sort?: keyof typeof WEBHOOK_SORT_FIELDS;
+  order?: "asc" | "desc";
 }): Promise<{
   items: AdminWebhookRow[];
   total: number;
   page: number;
-  page_size: number;
+  limit: number;
 }> {
   const page = Math.max(1, query.page ?? 1);
-  const pageSize = Math.min(100, Math.max(10, query.page_size ?? 25));
-  const skip = (page - 1) * pageSize;
+  const limit = Math.min(100, Math.max(10, query.limit ?? 25));
+  const skip = (page - 1) * limit;
+  const sortField = query.sort && query.sort in WEBHOOK_SORT_FIELDS ? query.sort : "received_at";
+  const order = query.order === "asc" ? "asc" : "desc";
   const where: Prisma.DuffelWebhookEventWhereInput = query.type
     ? { type: { contains: query.type, mode: "insensitive" } }
     : {};
   const [rows, total] = await Promise.all([
     prisma.duffelWebhookEvent.findMany({
       where,
-      orderBy: { received_at: "desc" },
+      orderBy: { [sortField]: order },
       skip,
-      take: pageSize,
+      take: limit,
     }),
     prisma.duffelWebhookEvent.count({ where }),
   ]);
@@ -373,6 +322,6 @@ export async function listAdminDuffelWebhooks(query: {
     })),
     total,
     page,
-    page_size: pageSize,
+    limit,
   };
 }

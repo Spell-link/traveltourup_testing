@@ -344,3 +344,21 @@ OR pending state (until verified)?
 First focus:
 only Duffel integration
 OR include flights + hotels + agents now?
+
+
+
+1) in the admin side for all the pages and all components for flights should be used and follow the same generic components and flow just like in users admin module
+like use the data-table,generic-filters,page-header,generic-forms and other generic componets in the flights so there should be proper consistency accross the admin side while all the functionality working well accordingly 
+
+so create professional and solid and optimized plan and than execute accordingly and every things should be optimized and working well 
+
+
+
+
+
+### Admin dashboard analytics (`/admin`)
+
+- **Flights & users:** live Prisma aggregates (`src/lib/services/admin/admin-dashboard.service.ts`).
+- **Hotels & cars:** deterministic preview mock (`src/lib/admin/dashboard-mock-data.ts`) with UI “Preview data” badge.
+- **URL params:** `?range=7d|30d|90d|ytd` and `?granularity=day|week`.
+- **Charts:** Recharts + `src/components/admin_ui/ui/chart.tsx`; sections under `src/components/admin/dashboard/`.

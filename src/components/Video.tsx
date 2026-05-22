@@ -21,7 +21,7 @@ export function Video() {
       preload="none"
       className="w-full h-full object-cover"
     >
-      <source src="/videos/looopvideo.mp4" type="video/mp4" />
+      <source src="/videos/featureFlight.mp4" type="video/mp4" />
  
     </video>
   );

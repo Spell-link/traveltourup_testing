@@ -3,7 +3,8 @@
 import { Link } from "@/i18n/navigation";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { CheckoutLoadingSkeleton } from "@/components/flights/FlightCheckoutLoadingSkeleton";
+import { CheckoutLoadingSkeleton } from "@/components/flights/FlightSkeletons";
+import type { FlightCheckoutContactPrefill } from "@/components/flights/FlightCheckoutDuffel";
 
 const FlightCheckoutDuffel = dynamic(
   () => import("@/components/flights/FlightCheckoutDuffel").then((m) => m.FlightCheckoutDuffel),
@@ -16,9 +17,14 @@ const FlightCheckoutDuffel = dynamic(
 /**
  * Flight payment page: requires `?offer_id=off_…` from search or detail CTA.
  */
-export function FlightPaymentEntry() {
+export function FlightPaymentEntry({
+  contactPrefill = null,
+}: {
+  contactPrefill?: FlightCheckoutContactPrefill | null;
+}) {
   const searchParams = useSearchParams();
   const offerId = searchParams.get("offer_id")?.trim() ?? "";
+  const searchSessionId = searchParams.get("search_session")?.trim() ?? null;
 
   if (!offerId) {
     return (
@@ -42,7 +48,11 @@ export function FlightPaymentEntry() {
   return (
     <div className="min-h-screen bg-muted flex flex-col">
       <div className="flex-grow pt-12 pb-12 sm:px-4">
-        <FlightCheckoutDuffel offerId={offerId} />
+        <FlightCheckoutDuffel
+          offerId={offerId}
+          searchSessionId={searchSessionId}
+          contactPrefill={contactPrefill}
+        />
       </div>
     </div>
   );

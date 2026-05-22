@@ -1,29 +1,67 @@
-"use client";
+﻿"use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import dynamic from "next/dynamic";
 import type { StripeError } from "@stripe/stripe-js";
 import { Loader2, Lock, Plane, Shield, ChevronUp } from "lucide-react";
 import type { FlightOfferDTO } from "@/lib/duffel/dto/flight-offer.dto";
 import type { FlightCheckoutBookingBody } from "@/lib/validations/flight-checkout.schema";
+import {
+  collectFlightPassengerBookingIssues,
+  getMaxPassengerBornOnYmdForOffer,
+  type FlightPassengerIssue,
+} from "@/lib/flights/flight-passenger-booking-validation";
+import {
+  buildFlightCheckoutContact,
+  buildFlightCheckoutPassengerPayload,
+  buildFlightCheckoutValidateBody,
+} from "@/lib/flights/flight-checkout-payload";
+import type { SearchPassengerAgeContext } from "@/lib/flights/passenger-age-rules";
 import { mergeFlightOrderServiceLines, type FlightOrderServiceLine } from "@/lib/validations/flight-ancillaries.schema";
 import { isFlightHoldOrderBackendEnabled } from "@/config/flight-hold.config";
-import { getFlightOffer, postFlightBooking, postFlightPaymentIntent } from "@/lib/http/flights.client";
+import { readFlightOfferSnapshot, clearFlightOfferSnapshot } from "@/lib/flights/flight-offer-snapshot";
+import {
+  getFlightOfferDeduped,
+  getFlightSearchSessionParams,
+  postFlightBooking,
+  postFlightBookingValidate,
+  postFlightPaymentIntent,
+} from "@/lib/http/flights.client";
+import { ApiRequestError } from "@/lib/http/api-client";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { NativeSelect } from "@/components/ui/NativeSelect";
+import { FlightCheckoutContactSection } from "@/components/flights/checkout/FlightCheckoutContactSection";
+import { FlightCheckoutPassengerCard } from "@/components/flights/checkout/FlightCheckoutPassengerCard";
+import {
+  isInfantPassengerType,
+  getOfferAdultPassengerIds,
+} from "@/lib/flights/infant-passenger-linking";
+import {
+  emptyContactState,
+  emptyPassengerRow,
+  type CheckoutContactState,
+  type PassengerFormRow,
+} from "@/components/flights/checkout/checkout-types";
+import { getRegionSelectOptions } from "@/lib/region-select-options";
 import {
   flightAncillariesStorageKey,
   type StoredFlightAncillaries,
 } from "@/lib/flights/flight-detail-session";
-import { CheckoutLoadingSkeleton } from "@/components/flights/FlightCheckoutLoadingSkeleton";
+import { CheckoutLoadingSkeleton } from "@/components/flights/FlightSkeletons";
+import {
+  FlightBookingFailureDialog,
+} from "@/components/flights/FlightBookingFailureDialog";
+import {
+  FlightBookingSuccessDialog,
+  type FlightBookingSuccessPayload,
+} from "@/components/flights/FlightBookingSuccessDialog";
 import { useLocale, useTranslations } from "next-intl";
 import { isRtlLocale } from "@/lib/i18n/rtl";
 import { parseIsoCurrencyAmountLine } from "@/lib/currency/format-display";
 import { useCurrency } from "@/components/providers/CurrencyProvider";
 import { Sheet, SheetContent, SheetTitle } from "@/components/admin_ui/ui/sheet";
 import { cn } from "@/lib/utils";
+import { readFlightSearchPath } from "@/lib/flights/flight-search-url-session";
 
 const BOOKING_STORAGE_KEY = "booking-details";
 const ORDER_MODE_STORAGE_KEY = "flight-checkout-order-mode";
@@ -41,37 +79,25 @@ type SessionBookingDetails = {
   subtitle?: string;
 };
 
-type PassengerFormRow = {
-  passenger_id: string;
-  title: "mr" | "mrs" | "ms" | "miss" | "dr";
-  given_name: string;
-  family_name: string;
-  born_on: string;
-  gender: "m" | "f";
-  email: string;
-  phone_number: string;
-  /** Required for infant passengers: adult `pas_` id (lap infant). */
-  infant_passenger_id?: string;
-};
-
 type CheckoutStep = "passengers" | "pay";
 type CheckoutOrderMode = "pay_now" | "hold";
 
-function emptyRow(pid: string): PassengerFormRow {
-  return {
-    passenger_id: pid,
-    title: "mr",
-    given_name: "",
-    family_name: "",
-    born_on: "",
-    gender: "m",
-    email: "",
-    phone_number: "",
-  };
-}
+export type FlightCheckoutContactPrefill = {
+  email?: string | null;
+  phone_number?: string | null;
+};
 
-export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
+export function FlightCheckoutDuffel({
+  offerId,
+  searchSessionId = null,
+  contactPrefill = null,
+}: {
+  offerId: string;
+  searchSessionId?: string | null;
+  contactPrefill?: FlightCheckoutContactPrefill | null;
+}) {
   const t = useTranslations("Flights.checkout");
+  const router = useRouter();
   const locale = useLocale();
   const isRtl = isRtlLocale(locale);
   const { currencyCode, formatPrice } = useCurrency();
@@ -82,7 +108,7 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
     const x = type.toLowerCase();
     if (x === "adult") return t("passengerTypeAdult");
     if (x === "child") return t("passengerTypeChild");
-    if (x === "infant") return t("passengerTypeInfant");
+    if (x === "infant" || x === "infant_without_seat") return t("passengerTypeInfant");
     return type.charAt(0).toUpperCase() + type.slice(1);
   }, [t]);
   const bookingIdempotencyRef = useRef(
@@ -95,6 +121,14 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
   const [offer, setOffer] = useState<FlightOfferDTO | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [passengers, setPassengers] = useState<PassengerFormRow[]>([]);
+  const [contact, setContact] = useState<CheckoutContactState>(() =>
+    emptyContactState({
+      email: contactPrefill?.email ?? "",
+      phone_number: contactPrefill?.phone_number ?? "",
+    }),
+  );
+  const [searchPassengers, setSearchPassengers] = useState<SearchPassengerAgeContext[] | null>(null);
+  const passengersSectionRef = useRef<HTMLDivElement>(null);
   const [step, setStep] = useState<CheckoutStep>("passengers");
   const [bagQuantities, setBagQuantities] = useState<Record<string, number>>({});
   const [seatSelections, setSeatSelections] = useState<Record<string, string>>({});
@@ -114,7 +148,8 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
   const [payBusy, setPayBusy] = useState(false);
   const [confirmingBooking, setConfirmingBooking] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
-  const [doneBooking, setDoneBooking] = useState<unknown | null>(null);
+  const [doneBooking, setDoneBooking] = useState<FlightBookingSuccessPayload | null>(null);
+  const [bookingFailureError, setBookingFailureError] = useState<ApiRequestError | null>(null);
   const [bookingDetails, setBookingDetails] = useState<SessionBookingDetails | null>(null);
   const [orderMode, setOrderMode] = useState<CheckoutOrderMode>("pay_now");
   const [mobileOrderSummaryOpen, setMobileOrderSummaryOpen] = useState(false);
@@ -131,6 +166,17 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
   useEffect(() => {
     if (lgUp) setMobileOrderSummaryOpen(false);
   }, [lgUp]);
+
+  useEffect(() => {
+    if (doneBooking) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [doneBooking]);
+
+  const handleBookingSuccessClose = useCallback(() => {
+    setDoneBooking(null);
+    router.push(readFlightSearchPath() ?? "/flights");
+  }, [router]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -172,12 +218,39 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
     let cancelled = false;
     setLoadError(null);
     setOffer(null);
-    getFlightOffer(offerId)
+    const snapshot = readFlightOfferSnapshot(offerId);
+    if (snapshot) {
+      const o = snapshot;
+      setOffer(o);
+      const adultIds = getOfferAdultPassengerIds(o);
+      let infantIdx = 0;
+      setPassengers(
+        o.passengers.map((p) => {
+          if (isInfantPassengerType(p.type) && adultIds.length > 0) {
+            return emptyPassengerRow(p.id, adultIds[infantIdx++ % adultIds.length]);
+          }
+          return emptyPassengerRow(p.id);
+        }),
+      );
+      return () => {
+        cancelled = true;
+      };
+    }
+    getFlightOfferDeduped(offerId)
       .then((res) => {
         if (cancelled) return;
         const o = res.offer;
         setOffer(o);
-        setPassengers(o.passengers.map((p) => emptyRow(p.id)));
+        const adultIds = getOfferAdultPassengerIds(o);
+        let infantIdx = 0;
+        setPassengers(
+          o.passengers.map((p) => {
+            if (isInfantPassengerType(p.type) && adultIds.length > 0) {
+              return emptyPassengerRow(p.id, adultIds[infantIdx++ % adultIds.length]);
+            }
+            return emptyPassengerRow(p.id);
+          }),
+        );
       })
       .catch((e: Error) => {
         if (!cancelled) setLoadError(e?.message ?? t("errorCouldNotLoadOffer"));
@@ -186,6 +259,21 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
       cancelled = true;
     };
   }, [offerId, t]);
+
+  useEffect(() => {
+    if (!searchSessionId?.trim()) return;
+    let cancelled = false;
+    getFlightSearchSessionParams(searchSessionId.trim())
+      .then((res) => {
+        if (!cancelled) setSearchPassengers(res.passengers);
+      })
+      .catch(() => {
+        if (!cancelled) setSearchPassengers(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchSessionId]);
 
   useEffect(() => {
     if (!offer) return;
@@ -211,30 +299,145 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
     });
   }, [offer]);
 
-  const adultPassengerIds = useMemo(() => {
+  const adultOptions = useMemo(() => {
     if (!offer) return [];
-    return offer.passengers.filter((p) => p.type?.toLowerCase() === "adult").map((p) => p.id);
-  }, [offer]);
+    let adultOrdinal = 0;
+    return offer.passengers
+      .filter((p) => p.type?.toLowerCase() === "adult")
+      .map((p) => {
+        adultOrdinal += 1;
+        const row = passengers.find((r) => r.passenger_id === p.id);
+        const name = [row?.given_name, row?.family_name].filter(Boolean).join(" ").trim();
+        return {
+          id: p.id,
+          label: name
+            ? `${t("passengerTypeAdult")} ${adultOrdinal} — ${name}`
+            : `${t("passengerTypeAdult")} ${adultOrdinal}`,
+        };
+      });
+  }, [offer, passengers, t]);
 
-  const canPreparePay = useMemo(() => {
+  const contactPayload = useMemo(() => buildFlightCheckoutContact(contact), [contact]);
+
+  const passengerPayload = useCallback((): FlightCheckoutBookingBody["passengers"] => {
+    return buildFlightCheckoutPassengerPayload(passengers);
+  }, [passengers]);
+
+  const validationContext = useMemo(
+    () => ({ searchPassengers, contact: contactPayload }),
+    [searchPassengers, contactPayload],
+  );
+
+  const countryOptions = useMemo(() => getRegionSelectOptions(locale), [locale]);
+
+  const showPassportSection = Boolean(offer?.passenger_identity_documents_required);
+
+  const canProceedPassengers = useMemo(() => {
     if (!offer || passengers.length === 0) return false;
-    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(passengers[0]?.email?.trim() ?? "");
-    const identityOk = passengers.every((p, idx) => {
-      const base =
-        p.given_name.trim() &&
-        p.family_name.trim() &&
-        /^\d{4}-\d{2}-\d{2}$/.test(p.born_on);
-      if (!base) return false;
-      if (idx > 0) return true;
-      return emailOk;
-    });
-    const infantsOk = passengers.every((p, idx) => {
-      const pt = offer.passengers[idx]?.type?.toLowerCase();
-      if (pt !== "infant") return true;
-      return Boolean(p.infant_passenger_id?.trim());
-    });
-    return identityOk && infantsOk;
-  }, [offer, passengers]);
+    return (
+      collectFlightPassengerBookingIssues(offer, passengerPayload(), validationContext).length ===
+      0
+    );
+  }, [offer, passengers, passengerPayload, validationContext]);
+
+  const passengerIssues = useMemo((): FlightPassengerIssue[] => {
+    if (!offer) return [];
+    return collectFlightPassengerBookingIssues(offer, passengerPayload(), validationContext);
+  }, [offer, passengerPayload, validationContext]);
+
+  const maxBornOnYmd = useMemo(() => (offer ? getMaxPassengerBornOnYmdForOffer(offer) : null), [offer]);
+
+  const translatePassengerIssue = useCallback(
+    (iss: FlightPassengerIssue): string => {
+      switch (iss.code) {
+        case "given_name_required":
+          return t("validationGivenNameRequired");
+        case "family_name_required":
+          return t("validationFamilyNameRequired");
+        case "born_on_format":
+          return t("validationBornOnFormat");
+        case "born_on_after_itinerary_max":
+          return t("validationBornOnBefore", { date: iss.values?.maxBornOn ?? "—" });
+        case "lead_email_invalid":
+          return t("validationLeadEmail");
+        case "lead_phone_required":
+          return t("validationLeadPhone");
+        case "lead_phone_e164":
+          return t("validationLeadPhoneE164");
+        case "infant_adult_required":
+          return t("validationInfantAdult");
+        case "infant_adult_invalid":
+          return t("validationInfantAdultInvalid");
+        case "infant_adult_duplicate":
+          return t("validationInfantAdultDuplicate");
+        case "passport_required":
+          return t("validationPassportRequired");
+        case "passport_number_required":
+          return t("validationPassportNumberRequired");
+        case "passport_country_required":
+          return t("validationPassportCountryRequired");
+        case "passport_expires_on_format":
+          return t("validationPassportExpiresFormat");
+        case "passport_expires_before_travel_end":
+          return t("validationPassportExpiresBeforeTravel", {
+            date: iss.values?.minExpiresOn ?? "—",
+          });
+        case "child_age_mismatch_return":
+          return t("validationChildAgeMismatch", {
+            age: iss.values?.expectedAge ?? "—",
+          });
+        case "infant_age_invalid":
+          return t("validationInfantAgeInvalid");
+        case "adult_age_invalid":
+          return t("validationAdultAgeInvalid");
+        default:
+          return t("validationGeneric");
+      }
+    },
+    [t],
+  );
+
+  const fieldError = useCallback(
+    (idx: number, field: string): string | undefined => {
+      const iss = passengerIssues.find((i) => i.path[1] === idx && i.path[2] === field);
+      return iss ? translatePassengerIssue(iss) : undefined;
+    },
+    [passengerIssues, translatePassengerIssue],
+  );
+
+  const contactEmailError = useMemo(() => {
+    const iss = passengerIssues.find((i) => i.code === "lead_email_invalid");
+    return iss ? translatePassengerIssue(iss) : undefined;
+  }, [passengerIssues, translatePassengerIssue]);
+
+  const contactPhoneError = useMemo(() => {
+    const iss = passengerIssues.find(
+      (i) => i.code === "lead_phone_required" || i.code === "lead_phone_e164",
+    );
+    return iss ? translatePassengerIssue(iss) : undefined;
+  }, [passengerIssues, translatePassengerIssue]);
+
+  const passportFieldError = useCallback(
+    (idx: number, field: string): string | undefined => {
+      const iss = passengerIssues.find((i) => {
+        if (i.path[1] !== idx) return false;
+        if (field === "identity_documents") {
+          return i.path.length === 3 && i.path[2] === "identity_documents";
+        }
+        return (
+          i.path.length >= 5 &&
+          i.path[2] === "identity_documents" &&
+          i.path[4] === field
+        );
+      });
+      return iss ? translatePassengerIssue(iss) : undefined;
+    },
+    [passengerIssues, translatePassengerIssue],
+  );
+
+  const scrollToFirstIssue = useCallback(() => {
+    passengersSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   const summaryBookingLine = useMemo(() => {
     const st = (bookingDetails?.type ?? "Flight").toLowerCase();
@@ -260,8 +463,26 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
   const preparePaymentIntent = async () => {
     setPricingError(null);
     setStepError(null);
+    setBookingFailureError(null);
+    if (!offer || !canProceedPassengers) {
+      scrollToFirstIssue();
+      return;
+    }
     setPayBusy(true);
     try {
+      const body = buildFlightCheckoutValidateBody({
+        offer_id: offerId,
+        contact,
+        passengers,
+        services: compiledServiceLines(),
+        search_session_id: searchSessionId,
+      });
+      const validation = await postFlightBookingValidate(body);
+      if (!validation.valid) {
+        setStepError(t("hintIncompleteForm"));
+        scrollToFirstIssue();
+        return;
+      }
       const pit = await postFlightPaymentIntent(
         { offer_id: offerId, services: compiledServiceLines() },
         paymentIntentIdempotencyRef.current,
@@ -280,48 +501,39 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
     }
   };
 
-  const passengerPayload = useCallback((): FlightCheckoutBookingBody["passengers"] => {
-    return passengers.map((p) => ({
-      passenger_id: p.passenger_id,
-      title: p.title,
-      given_name: p.given_name.trim(),
-      family_name: p.family_name.trim(),
-      born_on: p.born_on,
-      gender: p.gender,
-      ...(p.passenger_id === passengers[0]?.passenger_id && p.email.trim()
-        ? { email: p.email.trim() }
-        : {}),
-      ...(p.passenger_id === passengers[0]?.passenger_id && p.phone_number.trim()
-        ? { phone_number: p.phone_number.trim() }
-        : {}),
-      ...(p.infant_passenger_id?.trim() ? { infant_passenger_id: p.infant_passenger_id.trim() } : {}),
-    }));
-  }, [passengers]);
-
   const buildCheckoutBody = useCallback((): FlightCheckoutBookingBody | null => {
     if (!offer || !paymentIntentId) return null;
     return {
       offer_id: offer.id,
+      contact: contactPayload,
       order_mode: "pay_now",
       payment_intent_id: paymentIntentId,
       passengers: passengerPayload(),
       services: compiledServiceLines(),
+      ...(searchSessionId?.trim() ? { search_session_id: searchSessionId.trim() } : {}),
     };
-  }, [offer, passengerPayload, paymentIntentId, compiledServiceLines]);
+  }, [offer, contactPayload, passengerPayload, paymentIntentId, compiledServiceLines, searchSessionId]);
 
   const buildHoldCheckoutBody = useCallback((): FlightCheckoutBookingBody | null => {
     if (!offer) return null;
     return {
       offer_id: offer.id,
+      contact: contactPayload,
       order_mode: "hold",
       passengers: passengerPayload(),
       services: compiledServiceLines(),
+      ...(searchSessionId?.trim() ? { search_session_id: searchSessionId.trim() } : {}),
     };
-  }, [offer, passengerPayload, compiledServiceLines]);
+  }, [offer, contactPayload, passengerPayload, compiledServiceLines, searchSessionId]);
 
   const placeHoldOrder = async () => {
     setStepError(null);
     setPricingError(null);
+    setBookingFailureError(null);
+    if (!offer || !canProceedPassengers) {
+      scrollToFirstIssue();
+      return;
+    }
     setPayBusy(true);
     try {
       const body = buildHoldCheckoutBody();
@@ -330,9 +542,14 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
         return;
       }
       const booked = await postFlightBooking(body, bookingIdempotencyRef.current);
-      setDoneBooking(booked);
+      clearFlightOfferSnapshot(offerId);
+      setDoneBooking(booked as FlightBookingSuccessPayload);
     } catch (e) {
-      setStepError(e instanceof Error ? e.message : t("errorCouldNotPlaceHold"));
+      if (e instanceof ApiRequestError) {
+        setBookingFailureError(e);
+      } else {
+        setStepError(e instanceof Error ? e.message : t("errorCouldNotPlaceHold"));
+      }
     } finally {
       setPayBusy(false);
     }
@@ -340,6 +557,7 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
 
   const onSuccessfulCardPayment = async () => {
     setStepError(null);
+    setBookingFailureError(null);
     if (!paymentIntentId) return;
     setConfirmingBooking(true);
     try {
@@ -350,9 +568,14 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
       }
       /** Confirm + `POST /air/orders` run server-side in one saga (`POST /flights/bookings`). */
       const booked = await postFlightBooking(body, bookingIdempotencyRef.current);
-      setDoneBooking(booked);
+      clearFlightOfferSnapshot(offerId);
+      setDoneBooking(booked as FlightBookingSuccessPayload);
     } catch (e) {
-      setStepError(e instanceof Error ? e.message : t("errorBookingFailedAfterPayment"));
+      if (e instanceof ApiRequestError) {
+        setBookingFailureError(e);
+      } else {
+        setStepError(e instanceof Error ? e.message : t("errorBookingFailedAfterPayment"));
+      }
     } finally {
       setConfirmingBooking(false);
     }
@@ -369,6 +592,22 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
    * before the intent is created, and finally to the marketing summary copy
    * persisted on the flight detail page.
    */
+  const successChargeDisplay = useMemo(() => {
+    const cc = doneBooking?.guest_data?.customer_charge;
+    if (cc?.amount && cc?.currency) {
+      const n = Number.parseFloat(cc.amount);
+      if (Number.isFinite(n)) return formatPrice(n, cc.currency, locale);
+    }
+    if (chargePricing) {
+      const n = Number.parseFloat(chargePricing.amount);
+      if (Number.isFinite(n)) return formatPrice(n, chargePricing.currency, locale);
+    }
+    return null;
+  }, [doneBooking, chargePricing, formatPrice, locale]);
+
+  const isSuccessHold =
+    doneBooking?.status === "pending" && doneBooking?.payment_status === "unpaid";
+
   const summaryPrimaryPrice = useMemo(() => {
     if (chargePricing) {
       const n = Number.parseFloat(chargePricing.amount);
@@ -386,11 +625,11 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
     if (parsedBooking) {
       return formatPrice(parsedBooking.amount, parsedBooking.currency, locale);
     }
-    return bookingDetails?.price ?? "—";
+    return bookingDetails?.price ?? "â€”";
   }, [chargePricing, bookingDetails?.price, offer, formatPrice, locale]);
 
   const offerTotalDisplay = useMemo(() => {
-    if (!offer) return "—";
+    if (!offer) return "â€”";
     const n = Number.parseFloat(offer.total_amount);
     if (!Number.isFinite(n)) return `${offer.total_currency} ${offer.total_amount}`;
     return formatPrice(n, offer.total_currency, locale);
@@ -479,352 +718,248 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
     );
   }
 
-  if (doneBooking && typeof doneBooking === "object" && doneBooking !== null && "booking_ref_no" in doneBooking) {
-    const b = doneBooking as {
-      booking_ref_no?: string;
-      id?: string;
-      status?: string;
-      payment_status?: string;
-      flight_booking?: { booking_reference?: string | null };
-    };
-    const holdPlaced = b.status === "pending" && b.payment_status === "unpaid";
-    return (
-      <div
-        className="mx-auto max-w-xl rounded-2xl border border-border bg-card p-8 text-center shadow-lg"
-        dir={isRtl ? "rtl" : "ltr"}
-      >
-        <h1 className="mb-2 text-2xl font-bold text-foreground">
-          {holdPlaced ? t("successHoldPlaced") : t("successBookingConfirmed")}
-        </h1>
-        <p className="mb-4 text-muted-foreground">
-          {holdPlaced ? (
-            <span>
-              {t("successHoldBodyPrefix")}{" "}
-              <strong className="text-foreground">{b.booking_ref_no ?? b.id}</strong>
-            </span>
-          ) : (
-            <span>
-              {t("successReferencePrefix")}{" "}
-              <strong className="text-foreground">{b.booking_ref_no ?? b.id}</strong>
-              {b.flight_booking?.booking_reference ? (
-                <>
-                  {" "}
-                  · {t("successAirlinePnr")}{" "}
-                  <strong className="text-foreground">{b.flight_booking.booking_reference}</strong>
-                </>
-              ) : null}
-            </span>
-          )}
-        </p>
-        <Link
-          href={
-            typeof b.id === "string" && b.id
-              ? `/profile/bookings/${encodeURIComponent(b.id)}`
-              : "/profile/bookings"
-          }
-          className="font-semibold text-primary hover:underline"
-        >
-          {t("viewYourBooking")}
-        </Link>
-      </div>
-    );
-  }
-
   return (
     <>
       <div
         className={cn(
-          "container mx-auto sm:px-4",
+          "container mx-auto sm:px-4 transition-opacity duration-300",
           lgUp === false && "pb-[calc(5rem+env(safe-area-inset-bottom))]",
+          doneBooking && "pointer-events-none select-none opacity-40",
         )}
         dir={isRtl ? "rtl" : "ltr"}
+        aria-hidden={doneBooking ? true : undefined}
       >
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between px-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {t("offerSubtitle", {
-              offerId: offer.id,
-              currency: offer.total_currency,
-              amount: offer.total_amount,
-            })}
-            {step === "pay" ? <span className="mt-1 block text-xs">{t("stepPayment")}</span> : null}
-          </p>
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between px-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">{t("title")}</h1>
+            <p className="text-sm text-muted-foreground">
+              {t("offerSubtitle", {
+                offerId: offer.id,
+                currency: offer.total_currency,
+                amount: offer.total_amount,
+              })}
+              {step === "pay" ? <span className="mt-1 block text-xs">{t("stepPayment")}</span> : null}
+            </p>
+          </div>
+
         </div>
-      
-      </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-6 ">
-        <div className="space-y-6 lg:col-span-2">
-          {step === "passengers" ? (
-            <section className="relative sm:rounded-2xl sm:border sm:border-border bg-card/60  shadow-sm md:p-8 px-4">
-              {payBusy ? (
-                <div
-                  className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background/70 backdrop-blur-sm"
-                  role="status"
-                  aria-live="polite"
-                  aria-busy
-                >
-                  <Loader2 className="h-10 w-10 animate-spin text-primary" aria-hidden />
-                  <span className="text-sm font-medium text-foreground">
-                    {orderMode === "hold" && holdBackend ? t("placingHold") : t("preparingPayment")}
-                  </span>
-                </div>
-              ) : null}
-              <h2 className="mb-2 text-2xl font-bold text-foreground">{t("payNowOrHoldTitle")}</h2>
-              <p className="mb-4 text-sm text-muted-foreground">{t("payNowOrHoldIntro")}</p>
-              <div className="mb-8 space-y-3">
-                <label className="flex cursor-pointer gap-3 rounded-xl border border-border bg-card/80 p-4 has-[:checked]:border-primary has-[:checked]:ring-2 has-[:checked]:ring-primary/20">
-                  <input
-                    type="radio"
-                    name="checkout-order-mode"
-                    className="mt-1"
-                    checked={orderMode === "pay_now"}
-                    onChange={() => setOrderMode("pay_now")}
-                  />
-                  <div>
-                    <p className="font-semibold text-foreground">{t("payNowTitle")}</p>
-                    <p className="text-sm text-muted-foreground">{t("payNowDescription")}</p>
-                  </div>
-                </label>
-                <label
-                  className={`flex gap-3 rounded-xl border border-border bg-card/80 p-4 has-[:checked]:border-primary has-[:checked]:ring-2 has-[:checked]:ring-primary/20 ${
-                    holdBackend ? "cursor-pointer" : "cursor-not-allowed opacity-60"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="checkout-order-mode"
-                    className="mt-1"
-                    disabled={!holdBackend}
-                    checked={orderMode === "hold"}
-                    onChange={() => holdBackend && setOrderMode("hold")}
-                  />
-                  <div>
-                    <p className="font-semibold text-foreground">{t("holdOrderTitle")}</p>
-                    <p className="text-sm text-muted-foreground">{t("holdOrderDescription")}</p>
-                    {!holdBackend ? (
-                      <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{t("holdDisabledHint")}</p>
-                    ) : null}
-                  </div>
-                </label>
-              </div>
-              <h2 className="mb-6 text-2xl font-bold text-foreground">{t("passengerDetailsTitle")}</h2>
-              {pricingError ? <p className="mb-4 text-sm text-destructive">{pricingError}</p> : null}
-              {stepError ? <p className="mb-4 text-sm text-destructive">{stepError}</p> : null}
-              <div className="space-y-6">
-                {passengers.map((p, idx) => {
-                  const offerPax = offer.passengers[idx];
-                  const typeLabel = passengerTypeLabel(offerPax?.type);
-                  const isInfant = offerPax?.type?.toLowerCase() === "infant";
-                  const isLead = idx === 0;
-
-                  return (
-                    <div
-                      key={p.passenger_id}
-                      className="space-y-3 rounded-xl border border-border bg-card/80 p-4 md:p-5"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/80 pb-3">
-                        <div>
-                          <p className="text-base font-semibold text-foreground">
-                            {t("passengerIndex", { current: idx + 1, total: passengers.length })}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {t("referenceLabel")} <span className="font-mono">{p.passenger_id}</span>
-                          </p>
-                        </div>
-                        <span className="rounded-full bg-primary/15 px-3 py-1 text-xs font-semibold text-primary">
-                          {typeLabel}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <NativeSelect
-                          id={`${p.passenger_id}-title`}
-                          label={t("titleFieldLabel")}
-                          value={p.title}
-                          onChange={(e) => {
-                            const v = e.target.value as PassengerFormRow["title"];
-                            setPassengers((rows) => rows.map((r, i) => (i === idx ? { ...r, title: v } : r)));
-                          }}
-                        >
-                          <option value="mr">{t("titleMr")}</option>
-                          <option value="mrs">{t("titleMrs")}</option>
-                          <option value="ms">{t("titleMs")}</option>
-                          <option value="miss">{t("titleMiss")}</option>
-                          <option value="dr">{t("titleDr")}</option>
-                        </NativeSelect>
-                        <NativeSelect
-                          id={`${p.passenger_id}-gender`}
-                          label={t("genderFieldLabel")}
-                          value={p.gender}
-                          onChange={(e) => {
-                            const v = e.target.value as PassengerFormRow["gender"];
-                            setPassengers((rows) => rows.map((r, i) => (i === idx ? { ...r, gender: v } : r)));
-                          }}
-                        >
-                          <option value="m">{t("genderMale")}</option>
-                          <option value="f">{t("genderFemale")}</option>
-                        </NativeSelect>
-                        <Input
-                          id={`${p.passenger_id}-given`}
-                          label={t("givenNameLabel")}
-                          value={p.given_name}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                            const v = e.target.value;
-                            setPassengers((rows) => rows.map((r, i) => (i === idx ? { ...r, given_name: v } : r)));
-                          }}
-                        />
-                        <Input
-                          id={`${p.passenger_id}-family`}
-                          label={t("familyNameLabel")}
-                          value={p.family_name}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                            const v = e.target.value;
-                            setPassengers((rows) => rows.map((r, i) => (i === idx ? { ...r, family_name: v } : r)));
-                          }}
-                        />
-                        <Input
-                          id={`${p.passenger_id}-dob`}
-                          label={t("dobLabel")}
-                          type="date"
-                          value={p.born_on}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                            const v = e.target.value;
-                            setPassengers((rows) => rows.map((r, i) => (i === idx ? { ...r, born_on: v } : r)));
-                          }}
-                        />
-                        {isInfant && adultPassengerIds.length > 0 ? (
-                          <NativeSelect
-                            id={`${p.passenger_id}-infant-adult`}
-                            label={t("infantAdultLabel")}
-                            value={p.infant_passenger_id ?? ""}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setPassengers((rows) =>
-                                rows.map((r, i) => (i === idx ? { ...r, infant_passenger_id: v } : r)),
-                              );
-                            }}
-                          >
-                            <option value="">{t("selectAdultPassenger")}</option>
-                            {adultPassengerIds.map((aid) => (
-                              <option key={aid} value={aid}>
-                                {aid}
-                              </option>
-                            ))}
-                          </NativeSelect>
-                        ) : null}
-                        {isLead ? (
-                          <div className="sm:col-span-2 space-y-3 border-t border-border/60 pt-4">
-                            <h3 className="text-sm font-semibold text-foreground">{t("contactDetailsTitle")}</h3>
-                            <p className="text-xs text-muted-foreground">{t("contactDetailsHint")}</p>
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                              <Input
-                                id={`${p.passenger_id}-email`}
-                                label={t("emailLabel")}
-                                type="email"
-                                autoComplete="email"
-                                value={p.email}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                  const v = e.target.value;
-                                  setPassengers((rows) =>
-                                    rows.map((r, i) => (i === idx ? { ...r, email: v } : r)),
-                                  );
-                                }}
-                              />
-                              <Input
-                                id={`${p.passenger_id}-phone`}
-                                label={t("phoneOptionalLabel")}
-                                type="tel"
-                                autoComplete="tel"
-                                value={p.phone_number}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                  const v = e.target.value;
-                                  setPassengers((rows) =>
-                                    rows.map((r, i) => (i === idx ? { ...r, phone_number: v } : r)),
-                                  );
-                                }}
-                              />
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-8">
-                <Button
-                  type="button"
-                  className="inline-flex w-full items-center justify-center gap-2 py-4 text-base font-bold shadow-lg sm:w-auto"
-                  disabled={!canPreparePay || payBusy || (orderMode === "hold" && !holdBackend)}
-                  onClick={() => {
-                    if (orderMode === "hold" && holdBackend) void placeHoldOrder();
-                    else void preparePaymentIntent();
-                  }}
-                >
-                  {payBusy ? (
-                    <>
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-6 ">
+          <div className="space-y-6 lg:col-span-2">
+            {step === "passengers" ? (
+              <section className="relative sm:rounded-2xl sm:border sm:border-border bg-card/60  shadow-sm md:p-8 px-4">
+                {payBusy ? (
+                  <div
+                    className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background/70 backdrop-blur-sm"
+                    role="status"
+                    aria-live="polite"
+                    aria-busy
+                  >
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" aria-hidden />
+                    <span className="text-sm font-medium text-foreground">
                       {orderMode === "hold" && holdBackend ? t("placingHold") : t("preparingPayment")}
-                    </>
-                  ) : orderMode === "hold" && holdBackend ? (
-                    t("placeHold")
-                  ) : (
-                    t("continueToPayment")
-                  )}
-                </Button>
-                {!canPreparePay ? (
-                  <p className="mt-2 text-xs text-muted-foreground">{t("hintIncompleteForm")}</p>
-                ) : orderMode === "hold" && holdBackend ? (
-                  <p className="mt-2 text-xs text-muted-foreground">{t("hintHoldNoCharge")}</p>
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">{t("hintPayExtrasOnOffer")}</p>
-                )}
-              </div>
-            </section>
-          ) : null}
-
-          {step === "pay" && clientToken ? (
-            <div className="relative rounded-2xl border border-border bg-card/60 p-6 shadow-sm md:p-8">
-              {confirmingBooking ? (
-                <div
-                  className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background/80 backdrop-blur-sm"
-                  role="status"
-                  aria-live="polite"
-                  aria-busy
-                >
-                  <Loader2 className="h-10 w-10 animate-spin text-primary" aria-hidden />
-                  <span className="text-sm font-medium text-foreground">{t("confirmingBooking")}</span>
+                    </span>
+                  </div>
+                ) : null}
+                <h2 className="mb-2 text-2xl font-bold text-foreground">{t("payNowOrHoldTitle")}</h2>
+                <p className="mb-4 text-sm text-muted-foreground">{t("payNowOrHoldIntro")}</p>
+                <div className="mb-8 space-y-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <label className="flex cursor-pointer gap-3 rounded-xl border border-border bg-card/80 p-4 has-[:checked]:border-primary has-[:checked]:ring-2 has-[:checked]:ring-primary/20">
+                    <input
+                      type="radio"
+                      name="checkout-order-mode"
+                      className="mt-1"
+                      checked={orderMode === "pay_now"}
+                      onChange={() => setOrderMode("pay_now")}
+                    />
+                    <div>
+                      <p className="font-semibold text-foreground">{t("payNowTitle")}</p>
+                      <p className="text-sm text-muted-foreground">{t("payNowDescription")}</p>
+                    </div>
+                  </label>
+                  <label
+                    className={`flex gap-3 rounded-xl border border-border bg-card/80 p-4 has-[:checked]:border-primary has-[:checked]:ring-2 has-[:checked]:ring-primary/20 ${holdBackend ? "cursor-pointer" : "cursor-not-allowed opacity-60"
+                      }`}
+                  >
+                    <input
+                      type="radio"
+                      name="checkout-order-mode"
+                      className="mt-1"
+                      disabled={!holdBackend}
+                      checked={orderMode === "hold"}
+                      onChange={() => holdBackend && setOrderMode("hold")}
+                    />
+                    <div>
+                      <p className="font-semibold text-foreground">{t("holdOrderTitle")}</p>
+                      <p className="text-sm text-muted-foreground">{t("holdOrderDescription")}</p>
+                      {!holdBackend ? (
+                        <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{t("holdDisabledHint")}</p>
+                      ) : null}
+                    </div>
+                  </label>
                 </div>
-              ) : null}
-              <h2 className="mb-2 text-2xl font-bold text-foreground">{t("paymentSectionTitle")}</h2>
-              {/* <p className="mb-4 text-sm text-muted-foreground">
+                <FlightCheckoutContactSection
+                  contact={contact}
+                  onChange={setContact}
+                  emailError={contactEmailError}
+                  phoneError={contactPhoneError}
+                  labels={{
+                    title: t("contactDetailsTitle"),
+                    hint: t("contactDetailsHint"),
+                    email: t("emailLabel"),
+                    phone: t("phoneRequiredLabel"),
+                    phonePlaceholder: t("phonePlaceholder"),
+                  }}
+                />
+                <h2 className="mb-4 mt-8 text-2xl font-bold text-foreground">{t("passengerDetailsTitle")}</h2>
+                {pricingError ? <p className="mb-4 text-sm text-destructive">{pricingError}</p> : null}
+                {stepError ? <p className="mb-4 text-sm text-destructive">{stepError}</p> : null}
+                {!canProceedPassengers && passengerIssues.length > 0 ? (
+                  <div
+                    className="mb-4 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+                    role="alert"
+                  >
+                    <p className="font-medium">{t("validationSummaryTitle")}</p>
+                    <ul className="mt-2 list-inside list-disc space-y-1 text-xs">
+                      {passengerIssues.slice(0, 5).map((iss, i) => (
+                        <li key={`${iss.code}-${i}`}>{translatePassengerIssue(iss)}</li>
+                      ))}
+                      {passengerIssues.length > 5 ? (
+                        <li>{t("validationSummaryMore", { count: passengerIssues.length - 5 })}</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                ) : null}
+                <div ref={passengersSectionRef} className="space-y-6">
+                  {passengers.map((p, idx) => {
+                    const offerPax = offer.passengers[idx];
+                    const typeLabel = passengerTypeLabel(offerPax?.type);
+
+                    return (
+                      <FlightCheckoutPassengerCard
+                        key={p.passenger_id}
+                        index={idx}
+                        total={passengers.length}
+                        row={p}
+                        offerPassenger={offerPax}
+                        typeLabel={typeLabel}
+                        maxBornOnYmd={maxBornOnYmd}
+                        showPassport={showPassportSection}
+                        adultOptions={adultOptions}
+                        countryOptions={countryOptions}
+                        fieldError={(field) => fieldError(idx, field)}
+                        passportFieldError={(field) => passportFieldError(idx, field)}
+                        onChange={(next) =>
+                          setPassengers((rows) => rows.map((r, i) => (i === idx ? next : r)))
+                        }
+                        labels={{
+                          passengerIndex: t("passengerIndex", { current: idx + 1, total: passengers.length }),
+                          referenceLabel: t("referenceLabel"),
+                          personalDetailsTitle: t("personalDetailsTitle"),
+                          titleField: t("titleFieldLabel"),
+                          genderField: t("genderFieldLabel"),
+                          titleMr: t("titleMr"),
+                          titleMrs: t("titleMrs"),
+                          titleMs: t("titleMs"),
+                          titleMiss: t("titleMiss"),
+                          titleDr: t("titleDr"),
+                          genderMale: t("genderMale"),
+                          genderFemale: t("genderFemale"),
+                          givenName: t("givenNameLabel"),
+                          familyName: t("familyNameLabel"),
+                          dob: t("dobLabel"),
+                          infantAdult: t("infantAdultLabel"),
+                          selectAdult: t("selectAdultPassenger"),
+                          passportTitle: t("passportDetailsTitle"),
+                          passportNumber: t("passportNumberLabel"),
+                          passportCountry: t("passportCountryLabel"),
+                          passportCountryPlaceholder: t("passportCountryPlaceholder"),
+                          passportExpires: t("passportExpiresLabel"),
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="mt-6">
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      className="inline-flex w-full items-center justify-center gap-2 py-4 text-base font-bold shadow-lg sm:w-auto"
+                      disabled={!canProceedPassengers || payBusy || (orderMode === "hold" && !holdBackend)}
+                      onClick={() => {
+                        if (!canProceedPassengers) {
+                          scrollToFirstIssue();
+                          return;
+                        }
+                        if (orderMode === "hold" && holdBackend) void placeHoldOrder();
+                        else void preparePaymentIntent();
+                      }}
+                    >
+                      {payBusy ? (
+                        <>
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                          {orderMode === "hold" && holdBackend ? t("placingHold") : t("preparingPayment")}
+                        </>
+                      ) : orderMode === "hold" && holdBackend ? (
+                        t("placeHold")
+                      ) : (
+                        t("continueToPayment")
+                      )}
+                    </Button>
+                  </div>
+
+                  {!canProceedPassengers ? (
+                    <p className="mt-2 text-xs text-muted-foreground">{t("hintIncompleteForm")}</p>
+                  ) : orderMode === "hold" && holdBackend ? (
+                    <p className="mt-2 text-xs text-muted-foreground">{t("hintHoldNoCharge")}</p>
+                  ) : (
+                    <p className="mt-2 text-xs text-muted-foreground">{t("hintPayExtrasOnOffer")}</p>
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {step === "pay" && clientToken ? (
+              <div className="relative rounded-2xl border border-border bg-card/60 p-6 shadow-sm md:p-8">
+                {confirmingBooking ? (
+                  <div
+                    className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-background/80 backdrop-blur-sm"
+                    role="status"
+                    aria-live="polite"
+                    aria-busy
+                  >
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" aria-hidden />
+                    <span className="text-sm font-medium text-foreground">{t("confirmingBooking")}</span>
+                  </div>
+                ) : null}
+                <h2 className="mb-2 text-2xl font-bold text-foreground">{t("paymentSectionTitle")}</h2>
+                {/* <p className="mb-4 text-sm text-muted-foreground">
                 Fare and any add-ons selected on the offer page are included in this payment. If the airline price
                 moved, you may need to restart checkout.
               </p> */}
-              {stepError ? <p className="mb-4 text-sm text-destructive">{stepError}</p> : null}
-              <div className="mb-6 flex items-start gap-3 rounded-xl bg-primary/10 p-4 text-sm text-foreground">
-                <Lock className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden />
-                <p>{t("pciNotice")}</p>
+                {stepError ? <p className="mb-4 text-sm text-destructive">{stepError}</p> : null}
+                <div className="mb-6 flex items-start gap-3 rounded-xl bg-primary/10 p-4 text-sm text-foreground">
+                  <Lock className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden />
+                  <p>{t("pciNotice")}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-background/50 p-4">
+                  <h3 className="mb-3 text-lg font-semibold text-foreground">{t("cardDetailsTitle")}</h3>
+                  <DuffelPayments
+                    paymentIntentClientToken={clientToken}
+                    onSuccessfulPayment={() => void onSuccessfulCardPayment()}
+                    onFailedPayment={onFailedCardPayment}
+                  />
+                  <p className="mt-4 text-xs leading-relaxed text-muted-foreground">{t("duffelPaymentsStripeHint")}</p>
+                </div>
               </div>
-              <div className="rounded-xl border border-border/60 bg-background/50 p-4">
-                <h3 className="mb-3 text-lg font-semibold text-foreground">{t("cardDetailsTitle")}</h3>
-                <DuffelPayments
-                  paymentIntentClientToken={clientToken}
-                  onSuccessfulPayment={() => void onSuccessfulCardPayment()}
-                  onFailedPayment={onFailedCardPayment}
-                />
-                <p className="mt-4 text-xs leading-relaxed text-muted-foreground">{t("duffelPaymentsStripeHint")}</p>
-              </div>
-            </div>
-          ) : null}
-        </div>
+            ) : null}
+          </div>
 
-        {(lgUp === true || lgUp === null) && (
-          <div className="hidden lg:block lg:col-span-1">{renderOrderSummaryCard(true)}</div>
-        )}
+          {(lgUp === true || lgUp === null) && (
+            <div className="hidden lg:block lg:col-span-1">{renderOrderSummaryCard(true)}</div>
+          )}
+        </div>
       </div>
-    </div>
 
       {lgUp === false ? (
         <>
@@ -864,6 +999,29 @@ export function FlightCheckoutDuffel({ offerId }: { offerId: string }) {
           </Sheet>
         </>
       ) : null}
+
+      {doneBooking?.booking_ref_no || doneBooking?.id ? (
+        <FlightBookingSuccessDialog
+          open={Boolean(doneBooking)}
+          onClose={handleBookingSuccessClose}
+          booking={doneBooking}
+          offer={offer}
+          bookingDetails={bookingDetails}
+          chargeDisplay={successChargeDisplay}
+          isHold={isSuccessHold}
+          isRtl={isRtl}
+          confirmationEmail={contact.email.trim() || null}
+          flightsResultsHref={readFlightSearchPath() ?? "/flights"}
+        />
+      ) : null}
+
+      <FlightBookingFailureDialog
+        open={Boolean(bookingFailureError)}
+        onClose={() => setBookingFailureError(null)}
+        error={bookingFailureError}
+        isRtl={isRtl}
+        onRetrySearch={() => router.push("/flights")}
+      />
     </>
   );
 }

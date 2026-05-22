@@ -1,0 +1,20 @@
+{
+  "crons": [
+    {
+      "path": "/api/v1/ops/flights/poll-refunds",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/v1/ops/flights/expire-cancellation-quotes",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/v1/ops/flights/expire-order-change-quotes",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/v1/ops/flights/sweep-orphan-pit",
+      "schedule": "0 18 * * *"
+    }
+  ]
+}

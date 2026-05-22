@@ -1,41 +1,91 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
+import GenericForm, { type SubFormConfig } from "@/components/admin_ui/shared/generic-form";
+import { Alert, AlertDescription } from "@/components/admin_ui/ui/alert";
+import {
+  createFlightPricingRule,
+  updateFlightPricingRule,
+} from "@/lib/http/admin-flights.client";
+import {
+  flightPricingRuleBodySchema,
+  type FlightPricingRuleBody,
+} from "@/lib/validations/flight-pricing-rule.schema";
 
 export type PricingRuleFormValues = {
   name: string;
   enabled: boolean;
   priority: number;
-  origin_iata: string | null;
-  destination_iata: string | null;
-  carrier_iata: string | null;
-  cabin_class: "economy" | "premium_economy" | "business" | "first" | null;
-  commission_percent_override: number | null;
-  markup_fixed_override: string | null;
-  max_commission_percent: number | null;
-  max_markup_fixed: string | null;
-  effective_from: string | null;
-  effective_to: string | null;
-  notes: string | null;
+  origin_iata: string;
+  destination_iata: string;
+  carrier_iata: string;
+  cabin_class: string;
+  commission_percent_override: string;
+  markup_fixed_override: string;
+  max_commission_percent: string;
+  max_markup_fixed: string;
+  effective_from: string;
+  effective_to: string;
+  notes: string;
 };
 
-const DEFAULTS: PricingRuleFormValues = {
-  name: "",
-  enabled: true,
-  priority: 100,
-  origin_iata: null,
-  destination_iata: null,
-  carrier_iata: null,
-  cabin_class: null,
-  commission_percent_override: null,
-  markup_fixed_override: null,
-  max_commission_percent: null,
-  max_markup_fixed: null,
-  effective_from: null,
-  effective_to: null,
-  notes: null,
-};
+const CABIN_OPTIONS = [
+  { value: "", label: "any" },
+  { value: "economy", label: "economy" },
+  { value: "premium_economy", label: "premium_economy" },
+  { value: "business", label: "business" },
+  { value: "first", label: "first" },
+];
+
+function buildDefaults(initial?: Partial<PricingRuleFormValues>): PricingRuleFormValues {
+  return {
+    name: initial?.name ?? "",
+    enabled: initial?.enabled ?? true,
+    priority: initial?.priority ?? 100,
+    origin_iata: initial?.origin_iata ?? "",
+    destination_iata: initial?.destination_iata ?? "",
+    carrier_iata: initial?.carrier_iata ?? "",
+    cabin_class: initial?.cabin_class ?? "",
+    commission_percent_override:
+      initial?.commission_percent_override != null
+        ? String(initial.commission_percent_override)
+        : "",
+    markup_fixed_override: initial?.markup_fixed_override ?? "",
+    max_commission_percent:
+      initial?.max_commission_percent != null ? String(initial.max_commission_percent) : "",
+    max_markup_fixed: initial?.max_markup_fixed ?? "",
+    effective_from: initial?.effective_from ?? "",
+    effective_to: initial?.effective_to ?? "",
+    notes: initial?.notes ?? "",
+  };
+}
+
+function toApiBody(data: PricingRuleFormValues): FlightPricingRuleBody {
+  const cabin = data.cabin_class.trim();
+  const raw = {
+    name: data.name.trim(),
+    enabled: data.enabled,
+    priority: Number(data.priority) || 100,
+    origin_iata: data.origin_iata.trim() || null,
+    destination_iata: data.destination_iata.trim() || null,
+    carrier_iata: data.carrier_iata.trim() || null,
+    cabin_class: cabin ? (cabin as FlightPricingRuleBody["cabin_class"]) : null,
+    commission_percent_override:
+      data.commission_percent_override.trim() === ""
+        ? null
+        : Number(data.commission_percent_override),
+    markup_fixed_override: data.markup_fixed_override.trim() || null,
+    max_commission_percent:
+      data.max_commission_percent.trim() === "" ? null : Number(data.max_commission_percent),
+    max_markup_fixed: data.max_markup_fixed.trim() || null,
+    effective_from: data.effective_from.trim() || null,
+    effective_to: data.effective_to.trim() || null,
+    notes: data.notes.trim() || null,
+  };
+  return flightPricingRuleBodySchema.parse(raw);
+}
 
 type Props = {
   mode: "create" | "edit";
@@ -45,230 +95,157 @@ type Props = {
 
 export function PricingRuleForm({ mode, id, initial }: Props) {
   const router = useRouter();
-  const [values, setValues] = useState<PricingRuleFormValues>({
-    ...DEFAULTS,
-    ...initial,
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const form = useForm<PricingRuleFormValues>({
+    defaultValues: buildDefaults(initial),
   });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const update = <K extends keyof PricingRuleFormValues>(key: K, value: PricingRuleFormValues[K]) => {
-    setValues((prev) => ({ ...prev, [key]: value }));
-  };
+  const formFields: SubFormConfig[] = useMemo(
+    () => [
+      {
+        subform_title: "Rule",
+        fields: [
+          { name: "name", label: "Name", type: "text", required: true, cols: 12, mdCols: 8 },
+          { name: "priority", label: "Priority (lower wins)", type: "number", required: true, cols: 12, mdCols: 4 },
+          { name: "enabled", label: "Enable this rule", type: "switch", cols: 12, mdCols: 6 },
+        ],
+      },
+      {
+        subform_title: "Match criteria",
+        fields: [
+          {
+            name: "origin_iata",
+            label: "Origin IATA",
+            type: "text",
+            placeholder: "LHR",
+            cols: 12,
+            mdCols: 4,
+          },
+          {
+            name: "destination_iata",
+            label: "Destination IATA",
+            type: "text",
+            placeholder: "JFK",
+            cols: 12,
+            mdCols: 4,
+          },
+          {
+            name: "carrier_iata",
+            label: "Carrier IATA",
+            type: "text",
+            cols: 12,
+            mdCols: 4,
+          },
+          {
+            name: "cabin_class",
+            label: "Cabin class",
+            type: "select",
+            options: CABIN_OPTIONS,
+            cols: 12,
+            mdCols: 6,
+          },
+        ],
+      },
+      {
+        subform_title: "Overrides",
+        fields: [
+          {
+            name: "commission_percent_override",
+            label: "Commission % override",
+            type: "number",
+            cols: 12,
+            mdCols: 6,
+          },
+          {
+            name: "markup_fixed_override",
+            label: "Markup fixed override",
+            type: "text",
+            placeholder: "e.g. 5.00",
+            cols: 12,
+            mdCols: 6,
+          },
+        ],
+      },
+      {
+        subform_title: "Caps & schedule",
+        fields: [
+          {
+            name: "max_commission_percent",
+            label: "Hard cap: commission %",
+            type: "number",
+            cols: 12,
+            mdCols: 6,
+          },
+          {
+            name: "max_markup_fixed",
+            label: "Hard cap: fixed markup",
+            type: "text",
+            placeholder: "e.g. 10.00",
+            cols: 12,
+            mdCols: 6,
+          },
+          {
+            name: "effective_from",
+            label: "Effective from",
+            type: "datetime",
+            cols: 12,
+            mdCols: 6,
+          },
+          {
+            name: "effective_to",
+            label: "Effective to",
+            type: "datetime",
+            cols: 12,
+            mdCols: 6,
+          },
+          {
+            name: "notes",
+            label: "Notes (admin-only)",
+            type: "textarea",
+            cols: 12,
+            mdCols: 12,
+          },
+        ],
+      },
+    ],
+    [],
+  );
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
+  const onSubmit = async (data: PricingRuleFormValues) => {
+    setSubmitError(null);
     try {
-      const body: Record<string, unknown> = {
-        name: values.name.trim(),
-        enabled: values.enabled,
-        priority: values.priority,
-        origin_iata: values.origin_iata || null,
-        destination_iata: values.destination_iata || null,
-        carrier_iata: values.carrier_iata || null,
-        cabin_class: values.cabin_class || null,
-        commission_percent_override:
-          values.commission_percent_override == null
-            ? null
-            : Number(values.commission_percent_override),
-        markup_fixed_override: values.markup_fixed_override || null,
-        max_commission_percent:
-          values.max_commission_percent == null
-            ? null
-            : Number(values.max_commission_percent),
-        max_markup_fixed: values.max_markup_fixed || null,
-        effective_from: values.effective_from || null,
-        effective_to: values.effective_to || null,
-        notes: values.notes || null,
-      };
-      const url =
-        mode === "create"
-          ? "/api/v1/admin/flights/pricing-rules"
-          : `/api/v1/admin/flights/pricing-rules/${encodeURIComponent(id!)}`;
-      const res = await fetch(url, {
-        method: mode === "create" ? "POST" : "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json()) as
-        | { success: true; data: { id: string } }
-        | { success: false; message?: string };
-      if (!res.ok || data.success === false) {
-        throw new Error(("message" in data && data.message) || `HTTP ${res.status}`);
+      const body = toApiBody(data);
+      if (mode === "create") {
+        await createFlightPricingRule(body);
+      } else if (id) {
+        await updateFlightPricingRule(id, body);
       }
-      router.push(`/admin/flights/pricing-rules`);
+      router.push("/admin/flights/pricing-rules");
       router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save rule.");
-    } finally {
-      setBusy(false);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Could not save rule.");
     }
   };
 
   return (
-    <form onSubmit={submit} className="space-y-5 rounded-2xl border border-border bg-background p-4 sm:p-6">
-      <FormRow label="Name">
-        <input
-          required
-          value={values.name}
-          onChange={(e) => update("name", e.target.value)}
-          className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-        />
-      </FormRow>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <FormRow label="Origin IATA">
-          <input
-            value={values.origin_iata ?? ""}
-            onChange={(e) => update("origin_iata", e.target.value.toUpperCase() || null)}
-            maxLength={8}
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm uppercase"
-          />
-        </FormRow>
-        <FormRow label="Destination IATA">
-          <input
-            value={values.destination_iata ?? ""}
-            onChange={(e) => update("destination_iata", e.target.value.toUpperCase() || null)}
-            maxLength={8}
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm uppercase"
-          />
-        </FormRow>
-        <FormRow label="Carrier IATA">
-          <input
-            value={values.carrier_iata ?? ""}
-            onChange={(e) => update("carrier_iata", e.target.value.toUpperCase() || null)}
-            maxLength={8}
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm uppercase"
-          />
-        </FormRow>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <FormRow label="Cabin class">
-          <select
-            value={values.cabin_class ?? ""}
-            onChange={(e) =>
-              update(
-                "cabin_class",
-                (e.target.value || null) as PricingRuleFormValues["cabin_class"],
-              )
-            }
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-          >
-            <option value="">any</option>
-            <option value="economy">economy</option>
-            <option value="premium_economy">premium_economy</option>
-            <option value="business">business</option>
-            <option value="first">first</option>
-          </select>
-        </FormRow>
-        <FormRow label="Priority (lower wins)">
-          <input
-            type="number"
-            min={0}
-            max={10000}
-            value={values.priority}
-            onChange={(e) => update("priority", Number(e.target.value || 100))}
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-          />
-        </FormRow>
-        <FormRow label="Enabled">
-          <label className="inline-flex items-center gap-2 pt-2">
-            <input
-              type="checkbox"
-              checked={values.enabled}
-              onChange={(e) => update("enabled", e.target.checked)}
-            />
-            <span className="text-sm">Enable this rule</span>
-          </label>
-        </FormRow>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormRow label="Commission % override">
-          <input
-            type="number"
-            step="0.01"
-            min={0}
-            max={100}
-            value={values.commission_percent_override ?? ""}
-            onChange={(e) =>
-              update(
-                "commission_percent_override",
-                e.target.value === "" ? null : Number(e.target.value),
-              )
-            }
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-          />
-        </FormRow>
-        <FormRow label="Markup fixed override">
-          <input
-            value={values.markup_fixed_override ?? ""}
-            onChange={(e) =>
-              update("markup_fixed_override", e.target.value === "" ? null : e.target.value)
-            }
-            placeholder="e.g. 5.00"
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-          />
-        </FormRow>
-        <FormRow label="Hard cap: commission %">
-          <input
-            type="number"
-            step="0.01"
-            min={0}
-            max={100}
-            value={values.max_commission_percent ?? ""}
-            onChange={(e) =>
-              update(
-                "max_commission_percent",
-                e.target.value === "" ? null : Number(e.target.value),
-              )
-            }
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-          />
-        </FormRow>
-        <FormRow label="Hard cap: fixed markup">
-          <input
-            value={values.max_markup_fixed ?? ""}
-            onChange={(e) =>
-              update("max_markup_fixed", e.target.value === "" ? null : e.target.value)
-            }
-            placeholder="e.g. 10.00"
-            className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-          />
-        </FormRow>
-      </div>
-
-      <FormRow label="Notes (admin-only)">
-        <textarea
-          value={values.notes ?? ""}
-          onChange={(e) => update("notes", e.target.value || null)}
-          rows={3}
-          className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-        />
-      </FormRow>
-
-      {error ? <p className="text-sm text-rose-700">{error}</p> : null}
-
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={busy || values.name.trim().length === 0}
-          className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
-        >
-          {busy ? "Saving…" : mode === "create" ? "Create rule" : "Save changes"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function FormRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
-      {children}
-    </label>
+    <div className="space-y-4">
+      {submitError ? (
+        <Alert variant="destructive">
+          <AlertDescription>{submitError}</AlertDescription>
+        </Alert>
+      ) : null}
+      <GenericForm
+        form={form}
+        fields={formFields}
+        onSubmit={onSubmit}
+        submitText={mode === "create" ? "Create rule" : "Save changes"}
+        submittingText={mode === "create" ? "Creating…" : "Saving…"}
+        showCancel
+        cancelText="Cancel"
+        onCancel={() => router.push("/admin/flights/pricing-rules")}
+        className="rounded-2xl border border-border bg-background p-4 sm:p-6"
+      />
+    </div>
   );
 }

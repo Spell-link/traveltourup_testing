@@ -21,6 +21,8 @@ import { Skeleton } from "@/components/admin_ui/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { getRegionSelectOptions } from "@/lib/region-select-options";
 import { SearchableSelectCombobox } from "@/components/ui/SearchableSelectCombobox";
+import { MobileFullscreenSearchOverlay } from "@/components/shared/mobile/MobileFullscreenSearchOverlay";
+import { useMobileFullscreenInteraction } from "@/hooks/useMobileFullscreenInteraction";
 
 const HOTEL_COMBO_TRIGGER = `${COMBO_FIELD_SHELL_CLASS} cursor-pointer flex justify-between items-center font-medium`;
 const HOTEL_COMBO_TRIGGER_SM = `${COMBO_FIELD_SHELL_RESPONSIVE_CLASS} cursor-pointer flex justify-between items-center font-medium`;
@@ -72,6 +74,7 @@ function HotelsTab({
   const router = useRouter();
   const locale = useLocale();
   const ht = useTranslations("Hotels.tab");
+  const tCommon = useTranslations("Common");
   const [rooms, setRooms] = useState(1);
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
@@ -117,11 +120,66 @@ function HotelsTab({
     return hotelLocationApiRows.map((r) => ({ kind: "place" as const, r }));
   }, [destinationSearch, hotelLocationApiRows]);
 
+  const {
+    isMobile,
+    activeField,
+    openField,
+    closeField,
+    showInlinePanel,
+  } = useMobileFullscreenInteraction();
+
+  const closeAllPanels = useCallback(() => {
+    setShowCheckInPicker(false);
+    setShowCheckOutPicker(false);
+    setShowRoomsDropdown(false);
+    setShowDestinationDropdown(false);
+    setDestinationSearch("");
+    setDestinationHighlightIndex(-1);
+    closeField();
+  }, [closeField]);
+
+  const openDestinationField = useCallback(() => {
+    if (isMobile) {
+      openField("destination");
+      setShowDestinationDropdown(true);
+      setDestinationSearch("");
+    } else {
+      setShowDestinationDropdown(true);
+      setDestinationSearch("");
+    }
+  }, [isMobile, openField]);
+
+  const openDateField = useCallback(
+    (isCheckOut: boolean) => {
+      if (isMobile) {
+        openField(isCheckOut ? "checkOut" : "checkIn");
+        if (isCheckOut) setShowCheckOutPicker(true);
+        else setShowCheckInPicker(true);
+      } else if (isCheckOut) {
+        setShowCheckOutPicker((v) => !v);
+      } else {
+        setShowCheckInPicker((v) => !v);
+      }
+    },
+    [isMobile, openField],
+  );
+
+  const openGuestsField = useCallback(() => {
+    if (isMobile) {
+      openField("guests");
+      setShowRoomsDropdown(true);
+    } else {
+      setShowRoomsDropdown((v) => !v);
+    }
+  }, [isMobile, openField]);
+
   useEffect(() => {
     setDestinationHighlightIndex(-1);
   }, [destinationSearch, hotelLocationApiRows, showDestinationDropdown]);
 
   useEffect(() => {
+    if (isMobile) return;
+
     const handleClickOutside = (event) => {
       if (
         checkInPickerRef.current &&
@@ -155,23 +213,26 @@ function HotelsTab({
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, []);
+  }, [isMobile]);
 
   // Close all dropdowns on Escape key (Phase 5 - Accessibility)
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setShowCheckInPicker(false);
-        setShowCheckOutPicker(false);
-        setShowRoomsDropdown(false);
-        setShowDestinationDropdown(false);
-        setDestinationSearch("");
-        setDestinationHighlightIndex(-1);
+      if (e.key !== "Escape") return;
+      if (isMobile && activeField) {
+        closeAllPanels();
+        return;
       }
+      setShowCheckInPicker(false);
+      setShowCheckOutPicker(false);
+      setShowRoomsDropdown(false);
+      setShowDestinationDropdown(false);
+      setDestinationSearch("");
+      setDestinationHighlightIndex(-1);
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, []);
+  }, [activeField, closeAllPanels, isMobile]);
 
   // Focus search input when dropdown opens
   useEffect(() => {
@@ -367,11 +428,9 @@ function HotelsTab({
           radius: 15,
         });
       }
-      setShowDestinationDropdown(false);
-      setDestinationSearch("");
-      setDestinationHighlightIndex(-1);
+      closeAllPanels();
     },
-    [destinationListItems],
+    [closeAllPanels, destinationListItems],
   );
 
   const handleDestinationSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -426,6 +485,7 @@ function HotelsTab({
       setCheckOutDate((prev) => (prev && prev < formattedDate ? formattedDate : prev));
     }
     setShowPickerFunction(false);
+    closeField();
   };
 
   const nextMonth = () => {
@@ -513,14 +573,293 @@ function HotelsTab({
     return days;
   };
 
+  const renderDestinationSearchInput = () => (
+    <div className="w-full px-4 py-3 border border-input rounded-lg text-sm bg-card">
+      <input
+        ref={destinationSearchInputRef}
+        type="text"
+        placeholder={ht("destinationPlaceholder")}
+        value={destinationSearch}
+        onChange={(e) => setDestinationSearch(e.target.value)}
+        onKeyDown={handleDestinationSearchKeyDown}
+        className="w-full bg-transparent border-none outline-none text-foreground font-medium placeholder-muted-foreground"
+        autoFocus
+      />
+    </div>
+  );
+
+  const renderDestinationPanelBody = () => (
+    <>
+      {destinationSearch.trim().length < 2 ? (
+        <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
+          {ht("popularHint")}
+        </div>
+      ) : null}
+      <div className="py-1" role="listbox" aria-label={ht("destinationsAria")}>
+        {hotelLocationLoading && destinationSearch.trim().length >= 2 ? (
+          Array.from({ length: 6 }, (_, i) => (
+            <div
+              key={`sk-${i}`}
+              className="px-4 py-3 border-b border-border last:border-b-0"
+              aria-hidden
+            >
+              <div className="flex justify-between items-start gap-3">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-48 max-w-full" />
+                </div>
+                <Skeleton className="h-7 w-12 shrink-0 rounded" />
+              </div>
+              <Skeleton className="h-3 w-24 mt-2" />
+            </div>
+          ))
+        ) : destinationSearch.trim().length >= 2 && hotelLocationApiRows.length === 0 ? (
+          <div className="px-4 py-3 text-sm text-muted-foreground">{ht("noMatching")}</div>
+        ) : (
+          destinationListItems.map((item, index) => {
+            if (item.kind === "popular") {
+              const destination = item.d;
+              return (
+                <div
+                  key={destination.code}
+                  role="option"
+                  aria-selected={destinationHighlightIndex === index}
+                  className={cn(
+                    "px-4 py-3 hover:bg-primary/10 cursor-pointer border-b border-border last:border-b-0",
+                    destinationHighlightIndex === index && "bg-primary/10 ring-1 ring-inset ring-primary/20",
+                  )}
+                  onMouseEnter={() => setDestinationHighlightIndex(index)}
+                  onClick={() => selectDestinationListItem(index)}
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-semibold text-foreground">{destination.name}</div>
+                      <div className="text-xs text-muted-foreground">{destination.country}</div>
+                    </div>
+                    <div className="text-sm font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
+                      {destination.type}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            const place = item.r;
+            return (
+              <div
+                key={place.id}
+                role="option"
+                aria-selected={destinationHighlightIndex === index}
+                className={cn(
+                  "px-4 py-3 hover:bg-primary/10 cursor-pointer border-b border-border last:border-b-0",
+                  destinationHighlightIndex === index && "bg-primary/10 ring-1 ring-inset ring-primary/20",
+                )}
+                onMouseEnter={() => setDestinationHighlightIndex(index)}
+                onClick={() => selectDestinationListItem(index)}
+              >
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-semibold text-foreground">{place.city_name || place.name}</div>
+                    <div className="text-xs text-muted-foreground">{place.name}</div>
+                  </div>
+                  <div className="text-sm font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
+                    {place.iata_code}
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">{place.iata_country_code ?? ""}</div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </>
+  );
+
+  const renderDatePanelBody = (isCheckOut: boolean) => {
+    const selectedDate = isCheckOut ? checkOutDate : checkInDate;
+    const setDate = isCheckOut ? setCheckOutDate : setCheckInDate;
+    const setShowPicker = isCheckOut ? setShowCheckOutPicker : setShowCheckInPicker;
+
+    return (
+      <>
+        <div className="flex items-center justify-between mb-6">
+          <button
+            type="button"
+            onClick={prevMonth}
+            className="p-2 hover:bg-muted rounded-lg transition-colors border border-border"
+          >
+            <ChevronLeft className="w-5 h-5 text-muted-foreground" strokeWidth={2} />
+          </button>
+          <h3 className="text-lg font-bold text-foreground">
+            {formatMonthYear(new Date(currentYear, currentMonth))}
+          </h3>
+          <button
+            type="button"
+            onClick={nextMonth}
+            className="p-2 hover:bg-muted rounded-lg transition-colors border border-border"
+          >
+            <ChevronRight className="w-5 h-5 text-muted-foreground" strokeWidth={2} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-2 mb-4">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+            <div
+              key={day}
+              className="h-8 flex items-center justify-center text-sm font-semibold text-muted-foreground"
+            >
+              {day}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7 gap-2">
+          {renderCalendar(selectedDate, setDate, setShowPicker, isCheckOut)}
+        </div>
+
+        {selectedDate ? (
+          <div className="mt-4 pt-4 border-t border-border">
+            <div className="text-sm text-muted-foreground">Selected Date:</div>
+            <div className="text-lg font-semibold text-primary">{formatDate(selectedDate)}</div>
+          </div>
+        ) : null}
+      </>
+    );
+  };
+
+  const renderGuestPanelBody = () => (
+    <>
+      <div className="flex justify-between items-center mb-3 sm:mb-4">
+        <div>
+          <span className="text-sm font-bold text-foreground block">{ht("roomsCounterLabel")}</span>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => updateRooms("decrement")}
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
+            disabled={rooms <= 1}
+          >
+            -
+          </button>
+          <span className="text-sm font-bold w-4 sm:w-6 text-center text-muted-foreground">{rooms}</span>
+          <button
+            type="button"
+            onClick={() => updateRooms("increment")}
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold text-sm sm:text-base"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center mb-3 sm:mb-4">
+        <div>
+          <span className="text-sm font-bold text-foreground block">{ht("adults")}</span>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => updateAdults("decrement")}
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
+            disabled={adults <= 1}
+          >
+            -
+          </button>
+          <span className="text-sm font-bold w-4 sm:w-6 text-center text-muted-foreground">{adults}</span>
+          <button
+            type="button"
+            onClick={() => updateAdults("increment")}
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold text-sm sm:text-base"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center mb-3 sm:mb-4">
+        <div>
+          <span className="text-sm font-bold text-foreground block">{ht("children")}</span>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => updateChildren("decrement")}
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
+            disabled={children <= 0}
+          >
+            -
+          </button>
+          <span className="text-sm font-bold w-4 sm:w-6 text-center text-muted-foreground">{children}</span>
+          <button
+            type="button"
+            onClick={() => updateChildren("increment")}
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold text-sm sm:text-base"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center gap-2">
+        <span className="text-sm font-bold text-foreground shrink-0">{ht("nationality")}</span>
+        <SearchableSelectCombobox
+          className="shrink-0"
+          options={nationalitySelectOptions}
+          value={nationality}
+          onChange={setNationality}
+          searchPlaceholder={ht("nationalityComboPlaceholder")}
+          emptyMessage={ht("nationalityComboNoMatches")}
+          aria-label={ht("nationality")}
+        />
+      </div>
+    </>
+  );
+
+  const getMobileOverlayTitle = (key: string | null) => {
+    if (!key) return "";
+    switch (key) {
+      case "destination":
+        return ht("destinationLabel");
+      case "checkIn":
+        return ht("checkInDateLabel");
+      case "checkOut":
+        return ht("checkOutDateLabel");
+      case "guests":
+        return ht("roomsGuestsLabel");
+      default:
+        return "";
+    }
+  };
+
+  const renderMobilePanelBody = () => {
+    switch (activeField) {
+      case "destination":
+        return renderDestinationPanelBody();
+      case "checkIn":
+        return renderDatePanelBody(false);
+      case "checkOut":
+        return renderDatePanelBody(true);
+      case "guests":
+        return renderGuestPanelBody();
+      default:
+        return null;
+    }
+  };
+
+  const renderMobileHeaderSlot = () => {
+    if (activeField === "destination") return renderDestinationSearchInput();
+    return null;
+  };
+
+  const showInlineDestinationInput = showDestinationDropdown && !isMobile;
+
   return (
     <div className="mx-auto max-w-7xl">
       <div className="grid grid-cols-1 md:grid-cols-13 gap-3 rounded-lg pb-4 sm:gap-4">
         {/* Destination Dropdown - UPDATED LIKE FLIGHTSTAB */}
         <div className={mode ? "col-span-12 md:col-span-5 relative" : "col-span-12 md:col-span-3 relative"} ref={destinationDropdownRef}>
           <div className="relative">
-            {showDestinationDropdown ? (
-              // Search Input (shown when dropdown is open)
+            {showInlineDestinationInput ? (
               <div className="w-full px-4 py-3 border border-input rounded-lg text-sm bg-card h-16 pt-5">
                 <input
                   ref={destinationSearchInputRef}
@@ -534,14 +873,7 @@ function HotelsTab({
                 />
               </div>
             ) : (
-              // Display Selected Destination (shown when dropdown is closed)
-              <div
-                className={HOTEL_COMBO_TRIGGER}
-                onClick={() => {
-                  setShowDestinationDropdown(true);
-                  setDestinationSearch("");
-                }}
-              >
+              <div className={HOTEL_COMBO_TRIGGER} onClick={openDestinationField}>
                 <span className={selectedDestination ? "text-foreground font-semibold" : "text-muted-foreground"}>
                   {getDestinationDisplayText()}
                 </span>
@@ -553,114 +885,19 @@ function HotelsTab({
             </label>
           </div>
 
-          {/* Dropdown Content */}
-          {showDestinationDropdown && (
+          {showInlinePanel(showDestinationDropdown) ? (
             <div className="absolute top-full left-0 right-0 mt-1 border border-input rounded bg-card shadow-lg z-[500] max-h-80 dropdown-scrollbar">
-              {destinationSearch.trim().length < 2 ? (
-                <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
-                  {ht("popularHint")}
-                </div>
-              ) : null}
-              <div className="py-1" role="listbox" aria-label={ht("destinationsAria")}>
-                {hotelLocationLoading && destinationSearch.trim().length >= 2 ? (
-                  Array.from({ length: 6 }, (_, i) => (
-                    <div
-                      key={`sk-${i}`}
-                      className="px-4 py-3 border-b border-border last:border-b-0"
-                      aria-hidden
-                    >
-                      <div className="flex justify-between items-start gap-3">
-                        <div className="min-w-0 flex-1 space-y-2">
-                          <Skeleton className="h-4 w-32" />
-                          <Skeleton className="h-3 w-48 max-w-full" />
-                        </div>
-                        <Skeleton className="h-7 w-12 shrink-0 rounded" />
-                      </div>
-                      <Skeleton className="h-3 w-24 mt-2" />
-                    </div>
-                  ))
-                ) : destinationSearch.trim().length >= 2 && hotelLocationApiRows.length === 0 ? (
-                  <div className="px-4 py-3 text-sm text-muted-foreground">{ht("noMatching")}</div>
-                ) : (
-                  destinationListItems.map((item, index) => {
-                    if (item.kind === "popular") {
-                      const destination = item.d;
-                      return (
-                        <div
-                          key={destination.code}
-                          role="option"
-                          aria-selected={destinationHighlightIndex === index}
-                          className={cn(
-                            "px-4 py-3 hover:bg-primary/10 cursor-pointer border-b border-border last:border-b-0",
-                            destinationHighlightIndex === index && "bg-primary/10 ring-1 ring-inset ring-primary/20",
-                          )}
-                          onMouseEnter={() => setDestinationHighlightIndex(index)}
-                          onClick={() => selectDestinationListItem(index)}
-                        >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <div className="font-semibold text-foreground">
-                                {destination.name}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {destination.country}
-                              </div>
-                            </div>
-                            <div className="text-sm font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
-                              {destination.type}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
-                    const place = item.r;
-                    return (
-                      <div
-                        key={place.id}
-                        role="option"
-                        aria-selected={destinationHighlightIndex === index}
-                        className={cn(
-                          "px-4 py-3 hover:bg-primary/10 cursor-pointer border-b border-border last:border-b-0",
-                          destinationHighlightIndex === index && "bg-primary/10 ring-1 ring-inset ring-primary/20",
-                        )}
-                        onMouseEnter={() => setDestinationHighlightIndex(index)}
-                        onClick={() => selectDestinationListItem(index)}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <div className="font-semibold text-foreground">
-                              {place.city_name || place.name}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {place.name}
-                            </div>
-                          </div>
-                          <div className="text-sm font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
-                            {place.iata_code}
-                          </div>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1">
-                          {place.iata_country_code ?? ""}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
+              {renderDestinationPanelBody()}
             </div>
-          )}
+          ) : null}
         </div>
-          
+
         {/* Check-in Date */}
         <div className={mode ? "col-span-12 md:col-span-4 relative" : "col-span-12 md:col-span-3 relative"} ref={checkInPickerRef}>
           <div className="relative">
-            <div
-              className={HOTEL_COMBO_TRIGGER_SM}
-              onClick={() => setShowCheckInPicker(!showCheckInPicker)}
-            >
+            <div className={HOTEL_COMBO_TRIGGER_SM} onClick={() => openDateField(false)}>
               <span
-                className={`text-xs sm:text-sm ${checkInDate ? "text-foreground font-semibold" : "text-muted-foreground"
-                  } truncate`}
+                className={`text-xs sm:text-sm ${checkInDate ? "text-foreground font-semibold" : "text-muted-foreground"} truncate`}
               >
                 {formatDate(checkInDate)}
               </span>
@@ -671,75 +908,19 @@ function HotelsTab({
             </label>
           </div>
 
-          {/* Enhanced Custom Date Picker Dropdown */}
-          {showCheckInPicker && (
+          {showInlinePanel(showCheckInPicker) ? (
             <div className="absolute top-full left-0 right-0 mt-1 border border-input rounded-xl bg-card shadow-xl z-50 p-6 min-w-80">
-              {/* Calendar Header */}
-              <div className="flex items-center justify-between mb-6">
-                <button
-                  onClick={prevMonth}
-                  className="p-2 hover:bg-muted rounded-lg transition-colors border border-border"
-                >
-                  <ChevronLeft className="w-5 h-5 text-muted-foreground" strokeWidth={2} />
-                </button>
-                <h3 className="text-lg font-bold text-foreground">
-                  {formatMonthYear(new Date(currentYear, currentMonth))}
-                </h3>
-                <button
-                  onClick={nextMonth}
-                  className="p-2 hover:bg-muted rounded-lg transition-colors border border-border"
-                >
-                  <ChevronRight className="w-5 h-5 text-muted-foreground" strokeWidth={2} />
-                </button>
-              </div>
-
-              {/* Day Headers */}
-              <div className="grid grid-cols-7 gap-2 mb-4">
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
-                  (day) => (
-                    <div
-                      key={day}
-                      className="h-8 flex items-center justify-center text-sm font-semibold text-muted-foreground"
-                    >
-                      {day}
-                    </div>
-                  )
-                )}
-              </div>
-
-              {/* Calendar Days */}
-              <div className="grid grid-cols-7 gap-2">
-                {renderCalendar(
-                  checkInDate,
-                  setCheckInDate,
-                  setShowCheckInPicker,
-                  false
-                )}
-              </div>
-
-              {/* Selected Date Display */}
-              {checkInDate && (
-                <div className="mt-4 pt-4 border-t border-border">
-                  <div className="text-sm text-muted-foreground">Selected Date:</div>
-                  <div className="text-lg font-semibold text-primary">
-                    {formatDate(checkInDate)}
-                  </div>
-                </div>
-              )}
+              {renderDatePanelBody(false)}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Check-out Date */}
         <div className={mode ? "col-span-12 md:col-span-4 relative" : "col-span-12 md:col-span-3 relative"} ref={checkOutPickerRef}>
           <div className="relative">
-            <div
-              className={HOTEL_COMBO_TRIGGER_SM}
-              onClick={() => setShowCheckOutPicker(!showCheckOutPicker)}
-            >
+            <div className={HOTEL_COMBO_TRIGGER_SM} onClick={() => openDateField(true)}>
               <span
-                className={`text-xs sm:text-sm ${checkOutDate ? "text-foreground font-semibold" : "text-muted-foreground"
-                  } truncate`}
+                className={`text-xs sm:text-sm ${checkOutDate ? "text-foreground font-semibold" : "text-muted-foreground"} truncate`}
               >
                 {formatDate(checkOutDate)}
               </span>
@@ -750,77 +931,20 @@ function HotelsTab({
             </label>
           </div>
 
-          {/* Enhanced Custom Date Picker Dropdown */}
-          {showCheckOutPicker && (
+          {showInlinePanel(showCheckOutPicker) ? (
             <div className="absolute top-full left-0 right-0 mt-1 border border-input rounded-xl bg-card shadow-xl z-50 p-6 min-w-80">
-              {/* Calendar Header */}
-              <div className="flex items-center justify-between mb-6">
-                <button
-                  onClick={prevMonth}
-                  className="p-2 hover:bg-muted rounded-lg transition-colors border border-border"
-                >
-                  <ChevronLeft className="w-5 h-5 text-muted-foreground" strokeWidth={2} />
-                </button>
-                <h3 className="text-lg font-bold text-foreground">
-                  {formatMonthYear(new Date(currentYear, currentMonth))}
-                </h3>
-                <button
-                  onClick={nextMonth}
-                  className="p-2 hover:bg-muted rounded-lg transition-colors border border-border"
-                >
-                  <ChevronRight className="w-5 h-5 text-muted-foreground" strokeWidth={2} />
-                </button>
-              </div>
-
-              {/* Day Headers */}
-              <div className="grid grid-cols-7 gap-2 mb-4">
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
-                  (day) => (
-                    <div
-                      key={day}
-                      className="h-8 flex items-center justify-center text-sm font-semibold text-muted-foreground"
-                    >
-                      {day}
-                    </div>
-                  )
-                )}
-              </div>
-
-              {/* Calendar Days */}
-              <div className="grid grid-cols-7 gap-2">
-                {renderCalendar(
-                  checkOutDate,
-                  setCheckOutDate,
-                  setShowCheckOutPicker,
-                  true
-                )}
-              </div>
-
-              {/* Selected Date Display */}
-              {checkOutDate && (
-                <div className="mt-4 pt-4 border-t border-border">
-                  <div className="text-sm text-muted-foreground">Selected Date:</div>
-                  <div className="text-lg font-semibold text-primary">
-                    {formatDate(checkOutDate)}
-                  </div>
-                </div>
-              )}
+              {renderDatePanelBody(true)}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Rooms & Guests Dropdown */}
-          <div className={mode ? "col-span-12 md:col-span-10 relative" : "col-span-12 md:col-span-3 relative"} ref={roomsDropdownRef}>
+        <div className={mode ? "col-span-12 md:col-span-10 relative" : "col-span-12 md:col-span-3 relative"} ref={roomsDropdownRef}>
           <div className="relative">
-            <div
-              className={HOTEL_COMBO_TRIGGER_SM}
-              onClick={() => setShowRoomsDropdown(!showRoomsDropdown)}
-            >
+            <div className={HOTEL_COMBO_TRIGGER_SM} onClick={openGuestsField}>
               <div className="flex items-center gap-2 min-w-0">
                 <Building2 className="w-4 h-4 sm:w-5 sm:h-5 text-primary dark:text-white flex-shrink-0" strokeWidth={2} />
-                <span className="text-xs sm:text-sm truncate text-muted-foreground">
-                  {getTravelerText()}
-                </span>
+                <span className="text-xs sm:text-sm truncate text-muted-foreground">{getTravelerText()}</span>
               </div>
               <ChevronDown
                 className={`w-4 h-4 text-primary dark:text-white transition-transform flex-shrink-0 ${showRoomsDropdown ? "rotate-180" : ""}`}
@@ -831,107 +955,11 @@ function HotelsTab({
               {ht("roomsGuestsLabel")}
             </label>
 
-            {/* Rooms & Guests Dropdown Content */}
-            {showRoomsDropdown && (
+            {showInlinePanel(showRoomsDropdown) ? (
               <div className="absolute top-full left-0 right-0 mt-1 p-3 sm:p-4 border border-input rounded bg-card shadow-lg z-50 w-full min-w-[250px]">
-                {/* Rooms Counter */}
-                <div className="flex justify-between items-center mb-3 sm:mb-4">
-                  <div>
-                    <span className="text-sm font-bold text-foreground block">
-                      {ht("roomsCounterLabel")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <button
-                      onClick={() => updateRooms("decrement")}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
-                      disabled={rooms <= 1}
-                    >
-                      -
-                    </button>
-                    <span className="text-sm font-bold w-4 sm:w-6 text-center text-muted-foreground">
-                      {rooms}
-                    </span>
-                    <button
-                      onClick={() => updateRooms("increment")}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold text-sm sm:text-base"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                {/* Adults Counter */}
-                <div className="flex justify-between items-center mb-3 sm:mb-4">
-                  <div>
-                    <span className="text-sm font-bold text-foreground block">
-                      {ht("adults")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <button
-                      onClick={() => updateAdults("decrement")}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
-                      disabled={adults <= 1}
-                    >
-                      -
-                    </button>
-                    <span className="text-sm font-bold w-4 sm:w-6 text-center text-muted-foreground">
-                      {adults}
-                    </span>
-                    <button
-                      onClick={() => updateAdults("increment")}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold text-sm sm:text-base"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                {/* Children Counter */}
-                <div className="flex justify-between items-center mb-3 sm:mb-4">
-                  <div>
-                    <span className="text-sm font-bold text-foreground block">
-                      {ht("children")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <button
-                      onClick={() => updateChildren("decrement")}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
-                      disabled={children <= 0}
-                    >
-                      -
-                    </button>
-                    <span className="text-sm font-bold w-4 sm:w-6 text-center text-muted-foreground">
-                      {children}
-                    </span>
-                    <button
-                      onClick={() => updateChildren("increment")}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-input flex items-center justify-center text-primary hover:bg-primary/10 font-bold text-sm sm:text-base"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                {/* Nationality searchable combobox */}
-                <div className="flex  justify-between items-center gap-2">
-                  <span className="text-sm font-bold text-foreground shrink-0">
-                    {ht("nationality")}
-                  </span>
-                  <SearchableSelectCombobox
-                    className="shrink-0"
-                    options={nationalitySelectOptions}
-                    value={nationality}
-                    onChange={setNationality}
-                    searchPlaceholder={ht("nationalityComboPlaceholder")}
-                    emptyMessage={ht("nationalityComboNoMatches")}
-                    aria-label={ht("nationality")}
-                  />
-                </div>
+                {renderGuestPanelBody()}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -948,6 +976,16 @@ function HotelsTab({
           </button>
         </div>
       </div>
+
+      <MobileFullscreenSearchOverlay
+        open={!!activeField}
+        onClose={closeAllPanels}
+        title={getMobileOverlayTitle(activeField)}
+        headerSlot={renderMobileHeaderSlot()}
+        closeAriaLabel={tCommon("close")}
+      >
+        {renderMobilePanelBody()}
+      </MobileFullscreenSearchOverlay>
     </div>
   );
 }

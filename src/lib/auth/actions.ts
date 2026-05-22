@@ -9,7 +9,7 @@ import { safeInternalPath } from "@/lib/auth/redirect";
 import { defaultLocale } from "@/i18n/routing";
 import { firstNameFromUserMetadata, lastNameFromUserMetadata } from "@/lib/auth/user-metadata";
 
-/** Auth emails (confirm, reset, magic link) are sent through Resend when the Supabase Send Email Hook targets `POST /api/auth/supabase-email-hook`. Avoid sending a separate welcome email here on signup to prevent duplicates. */
+/** Auth emails (confirm, reset, magic link) are sent through SMTP when the Supabase Send Email Hook targets `POST /api/auth/supabase-email-hook`. Avoid sending a separate welcome email here on signup to prevent duplicates. */
 
 export type AuthActionState = {
   error?: string;

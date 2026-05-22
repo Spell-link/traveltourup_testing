@@ -14,6 +14,7 @@ import {
   mergeFlightOrderServiceLines,
   type FlightOrderServiceLine,
 } from "@/lib/validations/flight-ancillaries.schema";
+import type { FlightOfferDTO } from "@/lib/duffel/dto/flight-offer.dto";
 
 const MAX_DISTINCT_SERVICES = 32;
 
@@ -27,6 +28,16 @@ function unwrapOfferData(raw: unknown): Record<string, unknown> | null {
     return data as Record<string, unknown>;
   }
   return root;
+}
+
+function indexOfferLevelServicesFromDto(offer: FlightOfferDTO, out: ServicePriceIndex) {
+  for (const s of offer.available_services) {
+    out.set(s.id, {
+      amount: s.total_amount,
+      currency: s.total_currency,
+      maxQuantity: s.maximum_quantity,
+    });
+  }
 }
 
 function indexOfferLevelServices(offerData: Record<string, unknown>, out: ServicePriceIndex) {
@@ -103,6 +114,8 @@ export async function validateAndPriceOrderServices(input: {
    * and skips an extra getOffer).
    */
   offerTotalCurrency?: string | null;
+  /** Refreshed offer DTO from caller — skips redundant Duffel getOffer when set. */
+  preloadedOffer?: FlightOfferDTO | null;
 }): Promise<{
   orderServices: { id: string; quantity: number }[];
   servicesSubtotal: string;
@@ -130,24 +143,32 @@ export async function validateAndPriceOrderServices(input: {
     throw new AncillarySelectionError("Too many ancillary selections.");
   }
 
-  const [offerRaw, seatRaw] = await Promise.all([
-    getOffer(input.offerId, { return_available_services: true }),
-    listSeatMapsForOffer(input.offerId),
-  ]);
+  const index: ServicePriceIndex = new Map();
+  let offerCurrency: string | null = null;
 
-  const offerData = unwrapOfferData(offerRaw);
-  if (!offerData) {
-    throw new AncillarySelectionError("Could not load offer for extras.");
+  if (input.preloadedOffer) {
+    indexOfferLevelServicesFromDto(input.preloadedOffer, index);
+    offerCurrency = input.preloadedOffer.total_currency;
+  } else {
+    const offerRaw = await getOffer(input.offerId, { return_available_services: true });
+    const offerData = unwrapOfferData(offerRaw);
+    if (!offerData) {
+      throw new AncillarySelectionError("Could not load offer for extras.");
+    }
+    offerCurrency =
+      typeof offerData.total_currency === "string" ? offerData.total_currency : null;
+    indexOfferLevelServices(offerData, index);
   }
-  const offerCurrency =
-    typeof offerData.total_currency === "string" ? offerData.total_currency : null;
+
   if (!offerCurrency) {
     throw new AncillarySelectionError("Offer currency missing.");
   }
 
-  const index: ServicePriceIndex = new Map();
-  indexOfferLevelServices(offerData, index);
-  indexSeatMapServices(seatRaw, index);
+  const needsSeatMaps = merged.some((line) => !index.has(line.id));
+  if (needsSeatMaps) {
+    const seatRaw = await listSeatMapsForOffer(input.offerId);
+    indexSeatMapServices(seatRaw, index);
+  }
 
   let sum = 0;
   const orderServices: { id: string; quantity: number }[] = [];

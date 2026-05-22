@@ -12,7 +12,9 @@ export default function BookingLayoutClient({ children }: { children: React.Reac
       <BookingBreadcrumbFlightProvider>
         <Navbar />
         <Breadcrumb />
-        {children}
+        <div className="pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+          {children}
+        </div>
         <Footer />
       </BookingBreadcrumbFlightProvider>
     </BookingBreadcrumbHotelProvider>

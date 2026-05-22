@@ -11,6 +11,29 @@
  *
  * Works for admin, self-service, AND public calls from the same helper.
  */
+
+export type ApiErrorBody = {
+  message?: string;
+  code?: string;
+  payment_intent_id?: string;
+  refund_id?: string;
+  refund_status?: string;
+  support_reference?: string;
+  upstream_message?: string;
+  issues?: Array<{ message?: string; path?: Array<string | number> }>;
+};
+
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public details: ApiErrorBody,
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 export async function apiJson<T>(
   path: string,
   init?: Omit<RequestInit, "body"> & { body?: unknown },
@@ -41,11 +64,7 @@ export async function apiJson<T>(
   }
 
   if (!res.ok) {
-    const o = parsed as {
-      message?: string;
-      issues?: Array<{ message?: string; path?: Array<string | number> }>;
-      code?: string;
-    };
+    const o = parsed as ApiErrorBody & { success?: boolean };
     const issueMessages = o.issues
       ?.map((issue) => {
         if (!issue.message) return null;
@@ -58,7 +77,15 @@ export async function apiJson<T>(
       (issueMessages?.length ? issueMessages.join("; ") : null) ||
       (o.issues !== undefined ? JSON.stringify(o.issues) : null) ||
       `Request failed (${res.status})`;
-    throw new Error(typeof msg === "string" ? msg : String(msg));
+    const message = typeof msg === "string" ? msg : String(msg);
+    throw new ApiRequestError(message, res.status, {
+      code: o.code,
+      payment_intent_id: o.payment_intent_id,
+      refund_id: o.refund_id,
+      refund_status: o.refund_status,
+      support_reference: o.support_reference,
+      issues: o.issues,
+    });
   }
 
   return (parsed as { data: T }).data;

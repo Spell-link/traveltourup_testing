@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { useCurrency } from "@/components/providers/CurrencyProvider";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   getFlightBookingCancelStatus,
   postFlightBookingCancel,
@@ -14,32 +14,113 @@ import {
 
 type OrderCancellationQuote = {
   order_cancellation_id: string;
+  order_id?: string;
   status?: string;
   refund_amount?: string | null;
   refund_currency?: string | null;
   refund_to?: string | null;
   quote_expires_at?: string | null;
+  confirmed_at?: string | null;
 };
+
+type CancellationSuccessPayload = {
+  bookingRefNo: string;
+  refundDisplay: { amount: number; currency: string } | null;
+  refundToHuman: string;
+  isCredits: boolean;
+  confirmedAtLabel: string | null;
+};
+
+function parseOrderCancellation(raw: Record<string, unknown>): OrderCancellationQuote | null {
+  const id = raw.order_cancellation_id;
+  if (typeof id !== "string" || !id) return null;
+  return {
+    order_cancellation_id: id,
+    order_id: typeof raw.order_id === "string" ? raw.order_id : undefined,
+    status: typeof raw.status === "string" ? raw.status : undefined,
+    refund_amount:
+      typeof raw.refund_amount === "string"
+        ? raw.refund_amount
+        : typeof raw.refund_amount === "number"
+          ? String(raw.refund_amount)
+          : null,
+    refund_currency: typeof raw.refund_currency === "string" ? raw.refund_currency : null,
+    refund_to: typeof raw.refund_to === "string" ? raw.refund_to : null,
+    quote_expires_at: typeof raw.quote_expires_at === "string" ? raw.quote_expires_at : null,
+    confirmed_at: typeof raw.confirmed_at === "string" ? raw.confirmed_at : null,
+  };
+}
+
+function bookingRefFromResponse(booking: Record<string, unknown> | undefined, fallback: string): string {
+  const v = booking?.booking_ref_no;
+  return typeof v === "string" && v.trim() ? v : fallback;
+}
+
+function buildSuccessPayload(
+  oc: OrderCancellationQuote,
+  bookingRefNo: string,
+): CancellationSuccessPayload {
+  const isCredits = oc.refund_to === "airline_credits";
+  const refundToHuman =
+    oc.refund_to?.replace(/_/g, " ") ?? (isCredits ? "airline credits" : "original payment method");
+  let refundDisplay: { amount: number; currency: string } | null = null;
+  if (oc.refund_amount && oc.refund_currency) {
+    const n = Number.parseFloat(String(oc.refund_amount));
+    if (Number.isFinite(n)) {
+      refundDisplay = { amount: n, currency: oc.refund_currency.toUpperCase() };
+    }
+  }
+  let confirmedAtLabel: string | null = null;
+  if (oc.confirmed_at) {
+    try {
+      confirmedAtLabel = new Date(oc.confirmed_at).toLocaleString();
+    } catch {
+      confirmedAtLabel = oc.confirmed_at;
+    }
+  }
+  return {
+    bookingRefNo,
+    refundDisplay,
+    refundToHuman,
+    isCredits,
+    confirmedAtLabel,
+  };
+}
 
 export function FlightBookingCancelPanel({
   bookingId,
+  bookingRefNo,
   status,
   paymentStatus,
   hasDuffelOrder,
   onBookingRefresh,
+  embedded = false,
+  onActionsReady,
 }: {
   bookingId: string;
+  bookingRefNo: string;
   status: string;
   paymentStatus: string;
   hasDuffelOrder: boolean;
   onBookingRefresh: () => Promise<void>;
+  /** When true, hide section chrome; use Manage menu to open quote. */
+  embedded?: boolean;
+  onActionsReady?: (actions: { openQuote: () => void; busy: boolean }) => void;
 }) {
   const locale = useLocale();
+  const tMoney = useTranslations("BookingMoney");
   const { formatPrice } = useCurrency();
   const [modalOpen, setModalOpen] = useState(false);
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [successPayload, setSuccessPayload] = useState<CancellationSuccessPayload | null>(null);
   const [quote, setQuote] = useState<OrderCancellationQuote | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const showCancellationSuccess = useCallback((oc: OrderCancellationQuote, refNo: string) => {
+    setSuccessPayload(buildSuccessPayload(oc, refNo));
+    setSuccessOpen(true);
+  }, []);
 
   const openQuote = useCallback(async () => {
     setBusy(true);
@@ -50,9 +131,15 @@ export function FlightBookingCancelPanel({
         setError("Unexpected response from server.");
         return;
       }
-      const oc = res.order_cancellation as OrderCancellationQuote;
+      const rawOc = res.order_cancellation as Record<string, unknown>;
+      const oc = parseOrderCancellation(rawOc);
+      if (!oc) {
+        setError("Unexpected response from server.");
+        return;
+      }
       if (oc.status === "confirmed") {
         await onBookingRefresh();
+        showCancellationSuccess(oc, bookingRefNo);
         return;
       }
       setQuote(oc);
@@ -62,26 +149,56 @@ export function FlightBookingCancelPanel({
     } finally {
       setBusy(false);
     }
-  }, [bookingId]);
+  }, [bookingId, bookingRefNo, onBookingRefresh, showCancellationSuccess]);
 
   const confirmCancel = useCallback(async () => {
     if (!quote?.order_cancellation_id) return;
     setBusy(true);
     setError(null);
     try {
-      await postFlightBookingCancel(bookingId, {
+      const res = await postFlightBookingCancel(bookingId, {
         action: "confirm",
         order_cancellation_id: quote.order_cancellation_id,
       });
+      if (res.action !== "confirm") {
+        setError("Unexpected response from server.");
+        return;
+      }
+      const rawOc = res.order_cancellation as Record<string, unknown>;
+      const oc = parseOrderCancellation(rawOc);
+      const ref = bookingRefFromResponse(res.booking as Record<string, unknown> | undefined, bookingRefNo);
       setModalOpen(false);
       setQuote(null);
       await onBookingRefresh();
+      const bookingRaw = res.booking as Record<string, unknown> | undefined;
+      const paymentStatus =
+        typeof bookingRaw?.payment_status === "string" ? bookingRaw.payment_status : "";
+      if (paymentStatus === "refund_processing") {
+        try {
+          await getFlightBookingCancelStatus(bookingId);
+          await onBookingRefresh();
+        } catch {
+          // best-effort status sync when refund is async
+        }
+      }
+      if (oc) {
+        showCancellationSuccess(oc, ref);
+      } else {
+        setSuccessPayload({
+          bookingRefNo: ref,
+          refundDisplay: null,
+          refundToHuman: "your original payment method",
+          isCredits: false,
+          confirmedAtLabel: null,
+        });
+        setSuccessOpen(true);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not confirm cancellation.");
     } finally {
       setBusy(false);
     }
-  }, [bookingId, quote, onBookingRefresh]);
+  }, [bookingId, quote, bookingRefNo, onBookingRefresh, showCancellationSuccess]);
 
   const retryRefund = useCallback(async () => {
     setBusy(true);
@@ -109,13 +226,22 @@ export function FlightBookingCancelPanel({
     }
   }, [bookingId, onBookingRefresh]);
 
+  useEffect(() => {
+    onActionsReady?.({ openQuote: () => void openQuote(), busy });
+  }, [onActionsReady, openQuote, busy]);
+
   if (!hasDuffelOrder) return null;
 
   const showCancelCta = status === "confirmed";
   const showRefundRetry = status === "cancelled" && paymentStatus === "refund_failed";
   const showRefundPending = status === "cancelled" && paymentStatus === "refund_processing";
+  const showRefundComplete =
+    status === "cancelled" &&
+    (paymentStatus === "refunded" ||
+      paymentStatus === "partially_refunded" ||
+      paymentStatus === "credit_issued");
 
-  if (!showCancelCta && !showRefundRetry && !showRefundPending) return null;
+  if (!showCancelCta && !showRefundRetry && !showRefundPending && !showRefundComplete && !embedded) return null;
 
   const refundLabel =
     quote?.refund_amount && quote.refund_currency
@@ -123,6 +249,8 @@ export function FlightBookingCancelPanel({
       : null;
 
   return (
+    <>
+      {!embedded ? (
     <section className="rounded-xl border border-border bg-card p-5">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Cancel booking</h2>
       {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
@@ -145,10 +273,23 @@ export function FlightBookingCancelPanel({
         </div>
       ) : null}
 
+      {showRefundComplete ? (
+        <div className="mt-3 space-y-1">
+          <p className="text-sm font-medium text-foreground">
+            {tMoney(`paymentStatusLabel.${paymentStatus}` as "paymentStatusLabel.refunded")}
+          </p>
+          {tMoney.has(`paymentStatusHint.${paymentStatus}`) ? (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {tMoney(`paymentStatusHint.${paymentStatus}` as "paymentStatusHint.refunded")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {showRefundPending ? (
         <div className="mt-3 space-y-2">
           <p className="text-sm text-muted-foreground">
-            Your card refund is processing. This can take a short time to complete with our payments partner.
+            {tMoney("cancelRefundProcessing")}
           </p>
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void pollStatus()}>
             Refresh status
@@ -159,8 +300,7 @@ export function FlightBookingCancelPanel({
       {showRefundRetry ? (
         <div className="mt-3 space-y-2">
           <p className="text-sm text-destructive">
-            The booking was cancelled but the automatic card refund did not complete. You can retry once your
-            connection is stable.
+            {tMoney("cancelRefundFailed")}
           </p>
           <Button type="button" variant="primary" disabled={busy} onClick={() => void retryRefund()}>
             {busy ? (
@@ -169,10 +309,38 @@ export function FlightBookingCancelPanel({
                 <span className="ml-2">Please wait</span>
               </>
             ) : (
-              "Retry refund"
+              tMoney("cancelRefundRetry")
             )}
           </Button>
         </div>
+      ) : null}
+    </section>
+      ) : embedded && (showRefundRetry || showRefundPending || showRefundComplete || error) ? (
+        <section className="rounded-xl border border-border bg-card p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Cancellation</h2>
+          {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
+          {showRefundComplete ? (
+            <p className="mt-2 text-sm text-foreground">
+              {tMoney(`paymentStatusLabel.${paymentStatus}` as "paymentStatusLabel.refunded")}
+            </p>
+          ) : null}
+          {showRefundPending ? (
+            <div className="mt-2 space-y-2">
+              <p className="text-sm text-muted-foreground">{tMoney("cancelRefundProcessing")}</p>
+              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void pollStatus()}>
+                Refresh status
+              </Button>
+            </div>
+          ) : null}
+          {showRefundRetry ? (
+            <div className="mt-2 space-y-2">
+              <p className="text-sm text-destructive">{tMoney("cancelRefundFailed")}</p>
+              <Button type="button" variant="primary" disabled={busy} onClick={() => void retryRefund()}>
+                {tMoney("cancelRefundRetry")}
+              </Button>
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
       <Modal
@@ -240,6 +408,74 @@ export function FlightBookingCancelPanel({
           </div>
         ) : null}
       </Modal>
-    </section>
+
+      <Modal
+        isOpen={successOpen}
+        onClose={() => {
+          setSuccessOpen(false);
+          setSuccessPayload(null);
+        }}
+        title="Cancellation confirmed"
+        className="max-w-md"
+      >
+        {successPayload ? (
+          <div className="space-y-4 text-sm">
+            <div className="flex gap-3">
+              <CheckCircle2 className="h-10 w-10 shrink-0 text-emerald-600" aria-hidden />
+              <div>
+                <p className="font-medium text-foreground">Your flight is cancelled</p>
+                <p className="mt-1 text-muted-foreground">
+                  We&apos;ve sent a confirmation email to the address on your booking with refund or credit details and
+                  what to expect next.
+                </p>
+              </div>
+            </div>
+            <dl className="grid gap-2 rounded-lg border border-border bg-muted/30 p-4 sm:grid-cols-2">
+              <dt className="text-muted-foreground">Booking reference</dt>
+              <dd className="font-semibold text-foreground">{successPayload.bookingRefNo}</dd>
+              {successPayload.refundDisplay ? (
+                <>
+                  <dt className="text-muted-foreground">
+                    {successPayload.isCredits ? "Travel credit (quoted)" : "Refund (quoted)"}
+                  </dt>
+                  <dd className="font-semibold text-foreground">
+                    {formatPrice(
+                      successPayload.refundDisplay.amount,
+                      successPayload.refundDisplay.currency,
+                      locale,
+                    )}
+                  </dd>
+                </>
+              ) : null}
+              <dt className="text-muted-foreground">Refund to</dt>
+              <dd className="capitalize text-foreground">{successPayload.refundToHuman}</dd>
+              {successPayload.confirmedAtLabel ? (
+                <>
+                  <dt className="text-muted-foreground">Confirmed at</dt>
+                  <dd className="text-foreground">{successPayload.confirmedAtLabel}</dd>
+                </>
+              ) : null}
+            </dl>
+            <p className="text-muted-foreground">
+              {successPayload.isCredits
+                ? "Use your airline PNR on the carrier’s site to view or redeem travel credit."
+                : "Card refunds often appear within 5–10 business days. Scroll to Payment timeline on this page to track each step."}
+            </p>
+            <div className="flex justify-end pt-2">
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => {
+                  setSuccessOpen(false);
+                  setSuccessPayload(null);
+                }}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+    </>
   );
 }

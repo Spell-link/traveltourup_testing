@@ -17,7 +17,6 @@ export function stableFlightSearchBodyKey(body: FlightSearchBody): string {
     ...(body.max_connections !== undefined ? { max_connections: body.max_connections } : {}),
     ...(body.supplier_timeout_ms !== undefined ? { supplier_timeout_ms: body.supplier_timeout_ms } : {}),
     ...(body.max_price ? { max_price: body.max_price } : {}),
-    sort: body.sort,
     ...(body.carrier_iata?.length
       ? { carrier_iata: [...body.carrier_iata].map((c) => c.trim().toUpperCase()).sort() }
       : {}),
