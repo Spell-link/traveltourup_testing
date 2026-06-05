@@ -6,6 +6,7 @@ import { localizedCustomerPath } from "@/i18n/locale-path";
 import type { AppLocale } from "@/i18n/routing";
 import { safeInternalPath } from "@/lib/auth/redirect";
 import { getServerAuthz } from "@/lib/authz/session";
+import { trackFlightCheckoutStarted } from "@/lib/services/journey/journey-checkout-instrumentation";
 import { prisma } from "@/lib/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDuffelPhone } from "@/lib/validations/phone.schema";
@@ -81,6 +82,8 @@ export default async function Page({
   if (!userId) {
     redirect(`/${locale}/login?next=${encodeURIComponent(returnPath)}`);
   }
+
+  trackFlightCheckoutStarted({ userId, sp });
 
   const contactPrefill = await loadCheckoutContactPrefill(userId);
 

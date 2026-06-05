@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
       offerId: parsed.data.offer_id.trim(),
       idempotencyKey: idem,
       services: parsed.data.services,
+      userId,
     });
 
     return successResponse(data, 200);

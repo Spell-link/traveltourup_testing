@@ -33,6 +33,7 @@ export const ROUTE_PATH_TO_SEO_KEY: Record<string, string> = {
   "/carbooking": "carbooking",
   "/login": "login",
   "/signup": "signup",
+  "/verify-phone": "verify_phone",
   "/cars/payment": "cars_payment",
   "/hotels/payment": "hotels_payment",
   "/flights/payment": "flights_payment",
@@ -221,6 +222,13 @@ export const ROUTE_KEYWORDS: Partial<Record<string, string[]>> = {
     "register travel account",
     "join TravelTourUp",
   ],
+
+  "/verify-phone": [
+    "phone verification",
+    "SMS OTP verification",
+    "verify mobile number",
+    "TravelTourUp account security",
+  ],
 };
 
 function buildVerification(): Metadata["verification"] | undefined {
@@ -325,10 +333,14 @@ export async function getLocalizedRouteMetadata(
   locale: string,
   routePath: string,
 ): Promise<RouteMetadata> {
-  const base = ROUTE_METADATA[routePath];
-  if (!base) {
-    throw new Error(`ROUTE_METADATA missing for ${routePath}`);
-  }
+  const base = ROUTE_METADATA[routePath] ?? {
+    title: SITE_NAME,
+    description: `Book flights, hotels, and cars with ${SITE_NAME}.`,
+    openGraph: {
+      title: SITE_NAME,
+      description: `Book flights, hotels, and cars with ${SITE_NAME}.`,
+    },
+  };
   const keywordList = ROUTE_KEYWORDS[routePath];
   const keywordProps = keywordList?.length ? { keywords: keywordList } : {};
 
@@ -532,6 +544,14 @@ export const ROUTE_METADATA: Record<string, RouteMetadata> = {
     openGraph: {
       title: `Create Account — ${SITE_NAME}`,
       description: "Join TravelTourUp today.",
+    },
+  },
+  "/verify-phone": {
+    title: "Verify phone",
+    description: "Confirm your mobile number with a one-time SMS code.",
+    openGraph: {
+      title: `Verify phone — ${SITE_NAME}`,
+      description: "Secure your account with SMS verification.",
     },
   },
   "/cars/payment": {

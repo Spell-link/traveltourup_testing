@@ -43,20 +43,29 @@ const Hotels = ({ layout }: Props): React.ReactElement => {
   const showResults = layout === "results";
 
   return (
-    <div>
+ 
       <main>
         <HubPageH1 page="Hotels" />
         {!showResults ? (
-          <div id="hotel-search" className="scroll-mt-16 bg-muted px-4 pt-10 md:px-10">
+           <div className="relative sm:top-0 bg-muted p-2 sm:p-0">
+          <div className="relative  top-[-40px]   z-20  ">
+          <div id="hotel-search" className="max-w-7xl  mx-auto bg-background/80 rounded-xl shadow-xl border border-border/50">
+            <div className="p-4 sm:p-6">
             <HotelsTab layout={layout} />
+            </div>
+          </div>
+          </div>
           </div>
         ) : null}
         {showResults ? <HotelsList /> : null}
         <Suspense fallback={featuredFallback}>
-          <FeaturedHotelsWithFetch fallbackHotels={hotelsData} featuredAd={featuredAd} bgColor="bg-muted/40" />
+        <div className=" bg-muted">
+
+          <FeaturedHotelsWithFetch fallbackHotels={hotelsData} featuredAd={featuredAd} bgColor="bg-muted/40" mainPading="pt-1" />
+          </div>
         </Suspense>
       </main>
-    </div>
+  
   );
 };
 

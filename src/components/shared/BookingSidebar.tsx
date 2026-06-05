@@ -3,8 +3,12 @@
 import React, { useEffect, useId, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Plane, Building2, Car, Users, Calendar, Luggage, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  BookingSidebarSummaryRow,
+  BookingSidebarSummarySection,
+  formatSidebarDate,
+} from "@/components/shared/booking-sidebar-summary";
 import { Sheet, SheetContent, SheetTitle } from "@/components/admin_ui/ui/sheet";
 import type { HotelRoom } from "@/data/mock-hotels";
 import type { FlightOfferDTO } from "@/lib/duffel/dto/flight-offer.dto";
@@ -34,6 +38,11 @@ import {
   resolveHotelBookingSidebarMeta,
 } from "@/lib/bookings/booking-sidebar-context";
 import { writeFlightOfferSnapshot } from "@/lib/flights/flight-offer-snapshot";
+import { scrollToHotelAvailableRooms } from "@/lib/hotels/scroll-to-available-rooms";
+import { refreshStaysQuoteForCheckout } from "@/lib/http/stays.client";
+import { buildStaysQuoteSessionContext } from "@/lib/stays/stays-quote-context";
+import { writeStaysQuoteSession } from "@/lib/stays/stays-quote-session";
+import { trackClientJourneyEvent } from "@/lib/http/journey.client";
 
 const BOOKING_STORAGE_KEY = "booking-details";
 
@@ -75,10 +84,12 @@ export type BookingItem = FlightBookingItem | HotelBookingItem | CarBookingItem;
 
 export interface StaysQuoteSidebar {
   quoteId: string;
+  rateId: string;
   totalAmount: string;
   currency: string;
   checkIn: string;
   checkOut: string;
+  expiresAt?: string | null;
 }
 
 export interface BookingSidebarProps {
@@ -181,6 +192,7 @@ export function BookingSidebar({
   const searchParams = useSearchParams();
   const flightSearchSessionId = searchParams.get("search_session");
   const tb = useTranslations("Booking.sidebar");
+  const tCheckout = useTranslations("Hotels.checkout");
   const tChange = useTranslations("Flights.change");
   const tFlightTab = useTranslations("Flights.tab");
   const locale = useLocale();
@@ -393,6 +405,8 @@ export function BookingSidebar({
     return Math.max(1, diff);
   })();
 
+  const [hotelProceedBusy, setHotelProceedBusy] = useState(false);
+
   const totalRooms = selectedRooms?.length ?? 0;
   const hotelMustPickRoom = isHotel && hasHotelRooms && totalRooms === 0;
   const hotelAwaitingStaysQuote =
@@ -400,7 +414,8 @@ export function BookingSidebar({
     hasHotelRooms &&
     totalRooms > 0 &&
     requiresStaysQuote &&
-    (staysQuote === null || staysQuoteLoading);
+    (staysQuote === null || staysQuoteLoading) &&
+    !hotelProceedBusy;
   const priceFromQuote =
     staysQuote && staysQuote.totalAmount ? Number.parseFloat(staysQuote.totalAmount) : null;
 
@@ -431,7 +446,7 @@ export function BookingSidebar({
       : isHotel
         ? `${currency} ${Number.isFinite(price) ? price.toFixed(2) : "0.00"}`
         : type === "flight" && flightOffer && duffelEstimates
-          ? `${flightOffer.total_currency} ${duffelEstimates.total}`
+          ? `${flightOffer.total_currency} ${duffelEstimates.total.toFixed(2)}`
           : `${currency} ${Number(price).toFixed(2)}`;
 
   const travelerPartySummary = useMemo(() => {
@@ -443,8 +458,60 @@ export function BookingSidebar({
   }, [adults, children, infants, tb, tFlightTab]);
 
   const handleProceedToPayment = () => {
+    if (hotelMustPickRoom) {
+      setMobileBookingSheetOpen(false);
+      scrollToHotelAvailableRooms();
+      return;
+    }
+
     const title = getItemTitle(item, type);
     const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+
+    const productRef = String(item.id);
+    const journeyPrice = Number.isFinite(item.price) ? item.price.toFixed(2) : undefined;
+
+    const tripSnapshot: Partial<import("@/lib/journey/journey-trip-snapshot").JourneyTripSnapshot> = {
+      product_type: type,
+      product_ref: productRef,
+      start_date: checkIn || undefined,
+      end_date: checkOut || undefined,
+      adults,
+      children,
+      infants,
+      price_amount: journeyPrice,
+      price_currency: item.currency ?? undefined,
+    };
+
+    if (type === "flight") {
+      const f = item as FlightBookingItem;
+      tripSnapshot.origin_label = f.departureAirport ?? undefined;
+      tripSnapshot.destination_label = f.arrivalAirport ?? undefined;
+      tripSnapshot.origin_code = f.departureAirport ?? undefined;
+      tripSnapshot.destination_code = f.arrivalAirport ?? undefined;
+      tripSnapshot.airline = f.airline ?? undefined;
+      if (checkIn && checkOut && checkIn !== checkOut) {
+        tripSnapshot.trip_type = "round_trip";
+      } else {
+        tripSnapshot.trip_type = "one_way";
+      }
+    } else if (type === "hotel") {
+      const h = item as HotelBookingItem;
+      tripSnapshot.hotel_name = h.name ?? undefined;
+      tripSnapshot.location_label = h.address ?? undefined;
+      tripSnapshot.rooms = totalRooms > 0 ? totalRooms : rooms;
+      if (selectedRooms?.[0]?.name) tripSnapshot.room_name = selectedRooms[0].name;
+    }
+
+    trackClientJourneyEvent({
+      event_type: "checkout.clicked",
+      product_type: type,
+      product_ref: productRef,
+      stage: "checkout_clicked",
+      title,
+      price_amount: journeyPrice,
+      price_currency: item.currency ?? undefined,
+      trip_snapshot: tripSnapshot,
+    });
 
     const options: { label: string; value: string }[] = [];
 
@@ -517,7 +584,48 @@ export function BookingSidebar({
       options,
     };
 
+    const navigateHotelCheckout = async () => {
+      const rateId = selectedRooms?.[0]?.id;
+      if (!rateId) {
+        scrollToHotelAvailableRooms();
+        return;
+      }
+      setHotelProceedBusy(true);
+      try {
+        const fresh = await refreshStaysQuoteForCheckout(rateId);
+        const session = writeStaysQuoteSession({
+          quote: fresh,
+          checkIn,
+          checkOut,
+          searchResultId: typeof item.id === "string" ? item.id : undefined,
+          context: buildStaysQuoteSessionContext({
+            hotelName: title,
+            hotelAddress: "address" in item && typeof item.address === "string" ? item.address : undefined,
+            room: selectedRooms?.[0] ?? null,
+          }),
+        });
+        sessionStorage.setItem(BOOKING_STORAGE_KEY, JSON.stringify(bookingDetails));
+        const searchResultId = typeof item.id === "string" ? item.id : undefined;
+        const payQs = new URLSearchParams({ quote_id: session.quote_id });
+        if (searchResultId) payQs.set("search_result_id", searchResultId);
+        router.push(`/hotels/payment?${payQs.toString()}`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Could not lock price";
+        window.alert(
+          /expired|unavailable|no longer available/i.test(msg)
+            ? `${msg}\n\nPlease select the room again or run a new hotel search.`
+            : msg,
+        );
+      } finally {
+        setHotelProceedBusy(false);
+      }
+    };
+
     try {
+      if (type === "hotel" && requiresStaysQuote) {
+        void navigateHotelCheckout();
+        return;
+      }
       if (type === "flight" && flightOffer) {
         const payload: StoredFlightAncillaries = {
           bagQuantities: duffelBagQuantities,
@@ -533,20 +641,6 @@ export function BookingSidebar({
         }
       }
       sessionStorage.setItem(BOOKING_STORAGE_KEY, JSON.stringify(bookingDetails));
-      if (type === "hotel" && staysQuote) {
-        sessionStorage.setItem(
-          "ttu_stays_quote",
-          JSON.stringify({
-            quote_id: staysQuote.quoteId,
-            total_amount: staysQuote.totalAmount,
-            currency: staysQuote.currency,
-            check_in: staysQuote.checkIn,
-            check_out: staysQuote.checkOut,
-          }),
-        );
-        router.push(`/hotels/payment?quote_id=${encodeURIComponent(staysQuote.quoteId)}`);
-        return;
-      }
       if (isChangeFlow && changePaymentHref) {
         router.push(changePaymentHref);
         return;
@@ -562,138 +656,166 @@ export function BookingSidebar({
   };
 
   const Icon = type === "flight" ? Plane : type === "hotel" ? Building2 : Car;
+  const cardTitle = getItemTitle(item, type);
+  const bookingTypeLine = (() => {
+    const cat =
+      type === "hotel"
+        ? tCheckout("summaryTypeHotel")
+        : type === "car"
+          ? tCheckout("summaryTypeCar")
+          : tCheckout("summaryTypeFlight");
+    return `${cat} ${tCheckout("summaryBookingWord")}`.toUpperCase();
+  })();
+  const cardSubtitle =
+    type === "hotel" && "address" in item && typeof item.address === "string"
+      ? item.address
+      : type === "car" && "supplier" in item && typeof item.supplier === "string"
+        ? item.supplier
+        : null;
+  const datesSectionTitle =
+    type === "hotel" ? tb("datesHotel") : type === "car" ? tb("datesCar") : tb("datesFlight");
+  const stayRangeDisplay =
+    checkIn && checkOut
+      ? `${formatSidebarDate(checkIn, locale)} – ${formatSidebarDate(checkOut, locale)}`
+      : "—";
 
   const renderBookingCard = () => (
-    <div dir={isRtl ? "rtl" : "ltr"} className="bg-card rounded-2xl shadow-lg border border-border overflow-hidden">
-      <div className="bg-muted px-6 py-4 border-b border-border flex items-center gap-3">
-        <Icon className="w-6 h-6 text-primary" aria-hidden />
-        <h3 className="font-bold text-foreground text-lg">{tb("title")}</h3>
+    <div
+      dir={isRtl ? "rtl" : "ltr"}
+      className="overflow-auto rounded-2xl border border-border bg-card shadow-sm dropdown-scrollbar max-h-[calc(100vh-6rem)]"
+    >
+      <div className="flex items-center gap-3 border-b border-border bg-muted px-6 py-4">
+        <Icon className="h-6 w-6 shrink-0 text-primary" aria-hidden />
+        <h3 className="text-lg font-bold text-foreground">{tb("title")}</h3>
       </div>
 
-      <div className="p-4 space-y-5">
-        {/* Hotel: selected rooms summary */}
-        {hasHotelRooms && (
-          <div className="rounded-lg border border-border p-3 bg-muted/30">
-            {totalRooms > 0 ? (
-              <>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{tb("selectedRoomsHeading")}</p>
-                <div className="max-h-20 overflow-y-auto overscroll-contain pr-1 space-y-2 dropdown-scrollbar">
-                  {(() => {
-                    const byRoom = selectedRooms!.reduce((acc, r) => {
-                      if (!acc[r.id]) acc[r.id] = { room: r, count: 0 };
-                      acc[r.id].count++;
-                      return acc;
-                    }, {} as Record<string, { room: (typeof selectedRooms)[0]; count: number }>);
-                    const nightsWord = nights === 1 ? tb("nightSingular") : tb("nightPlural");
-                    return Object.values(byRoom).map(({ room, count }) => (
-                      <div key={room.id}>
-                        <p className="font-semibold text-foreground">{room.name}{count > 1 ? ` (×${count})` : ""}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {room.totalStayAmount && room.totalStayCurrency
-                            ? `${formatPrice(Number.parseFloat(room.totalStayAmount), room.totalStayCurrency, locale)} ${tb("totalStayPhrase")}${count > 1 ? ` × ${count}` : ""}`
-                            : `${formatPrice(room.pricePerNight, currency, locale)} × ${nights} ${nightsWord}${count > 1 ? ` × ${count}` : ""} = ${formatPrice(room.pricePerNight * nights * count, currency, locale)}`}
-                        </p>
-                      </div>
-                    ));
-                  })()}
-                </div>
-                <p className="text-sm font-medium text-foreground pt-2 mt-2 border-t border-border">
-                  {tb("totalColon")}{" "}
-                  {staysQuote?.totalAmount
-                    ? formatPrice(Number.parseFloat(staysQuote.totalAmount), staysQuote.currency, locale)
-                    : formatPrice(selectedRooms!.reduce((sum, r) => sum + hotelRoomStayTotal(r), 0), currency, locale)}
-                  {staysQuote ? null : (
-                    <span className="block text-xs font-normal text-muted-foreground">
-                      {tb("confirmedQuoteHint")}
-                    </span>
-                  )}
-                </p>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">{tb("hotelPromptSelectRooms")}</p>
-            )}
-          </div>
-        )}
-        {/* Dates */}
+      <div className="space-y-2 p-4">
         <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-foreground mb-2">
-            <Calendar className="w-4 h-4 text-foreground dark:text-white" strokeWidth={2} />
-            {type === "hotel" ? tb("datesHotel") : type === "car" ? tb("datesCar") : tb("datesFlight")}
-          </label>
-          <div className="grid grid-cols-2 gap-2 ">
-            <Input
-              type="date"
-              value={checkIn}
-              disabled
-              readOnly
-            />
-            <Input
-              type="date"
-              value={checkOut}
-              disabled
-              readOnly
-            />
-          </div>
+          <p className="mb-1 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            {bookingTypeLine}
+          </p>
+          <h4 className="text-xl font-bold leading-snug text-foreground">{cardTitle}</h4>
+          {cardSubtitle ? (
+            <p className="mt-1 text-sm text-muted-foreground">{cardSubtitle}</p>
+          ) : null}
         </div>
 
-        {/* Travelers / Guests */}
-        {(type === "flight" || type === "hotel") && (
-          <div>
-            <label className="flex items-center gap-2 text-sm font-medium text-foreground mb-2">
-              <Users className="w-4 h-4" />
-              {type === "hotel" ? tb("guests") : tb("travelers")}
-            </label>
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <label className="text-xs text-muted-foreground">{tb("adults")}</label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={9}
-                  value={adults}
-                  disabled
-                  readOnly
-                />
-              </div>
-              <div className="flex-1">
-                <label className="text-xs text-muted-foreground">{tb("children")}</label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={9}
-                  disabled
-                  readOnly
-                  value={children}
-                />
-              </div>
-              {infants > 0 ? (
-                <div className="flex-1">
-                  <label className="text-xs text-muted-foreground">{tFlightTab("infantsLabel")}</label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={9}
-                    disabled
-                    readOnly
-                    value={infants}
-                  />
-                </div>
-              ) : null}
+        {hasHotelRooms && totalRooms === 0 ? (
+          <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+            {tb("hotelPromptSelectRooms")}
+          </p>
+        ) : null}
+
+        {hasHotelRooms && totalRooms > 0 ? (
+          <div className="rounded-lg border border-border bg-muted/25 px-3 py-3">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              {tb("selectedRoomsHeading")}
+            </p>
+            <div className="max-h-24 space-y-2 overflow-y-auto overscroll-contain pr-1 dropdown-scrollbar">
+              {(() => {
+                const byRoom = selectedRooms!.reduce((acc, r) => {
+                  if (!acc[r.id]) acc[r.id] = { room: r, count: 0 };
+                  acc[r.id].count++;
+                  return acc;
+                }, {} as Record<string, { room: (typeof selectedRooms)[0]; count: number }>);
+                const nightsWord = nights === 1 ? tb("nightSingular") : tb("nightPlural");
+                return Object.values(byRoom).map(({ room, count }) => (
+                  <div key={room.id}>
+                    <p className="font-semibold text-foreground">
+                      {room.name}
+                      {count > 1 ? ` (×${count})` : ""}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {room.totalStayAmount && room.totalStayCurrency
+                        ? `${formatPrice(Number.parseFloat(room.totalStayAmount), room.totalStayCurrency, locale)} ${tb("totalStayPhrase")}${count > 1 ? ` × ${count}` : ""}`
+                        : `${formatPrice(room.pricePerNight, currency, locale)} × ${nights} ${nightsWord}${count > 1 ? ` × ${count}` : ""} = ${formatPrice(room.pricePerNight * nights * count, currency, locale)}`}
+                    </p>
+                  </div>
+                ));
+              })()}
             </div>
-            {type === "hotel" && !hasHotelRooms && (
-              <div className="mt-2">
-                <label className="text-xs text-muted-foreground">{tb("rooms")}</label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={9}
-                  value={rooms}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRooms(Number(e.target.value) || 1)}
-                />
-              </div>
-            )}
           </div>
-        )}
+        ) : null}
+
+        <div className="space-y-4">
+          <BookingSidebarSummarySection icon={<Calendar strokeWidth={2} />} title={datesSectionTitle}>
+            <BookingSidebarSummaryRow
+              label={type === "hotel" ? tb("summaryStay") : tb("summaryDates")}
+              value={stayRangeDisplay}
+            />
+            {type === "hotel" && checkIn && checkOut ? (
+              <BookingSidebarSummaryRow
+                label={tb("summaryNights")}
+                value={`${nights} ${nights === 1 ? tb("nightSingular") : tb("nightPlural")}`}
+              />
+            ) : null}
+          </BookingSidebarSummarySection>
+
+          {(type === "flight" || type === "hotel") && (
+            <BookingSidebarSummarySection
+              icon={<Users className="h-4 w-4" />}
+              title={type === "hotel" ? tb("guests") : tb("travelers")}
+            >
+              <BookingSidebarSummaryRow
+                label={type === "hotel" ? tb("summaryGuests") : tb("summaryTravelers")}
+                value={travelerPartySummary}
+              />
+              {type === "hotel" ? (
+                <BookingSidebarSummaryRow
+                  label={tb("summaryRooms")}
+                  value={String(totalRooms > 0 ? totalRooms : rooms)}
+                />
+              ) : null}
+              {type === "hotel" && selectedRooms && selectedRooms.length > 0
+                ? (() => {
+                    const byId = selectedRooms.reduce((acc, r) => {
+                      if (!acc[r.id]) acc[r.id] = { name: r.name, count: 0 };
+                      acc[r.id].count++;
+                      return acc;
+                    }, {} as Record<string, { name: string; count: number }>);
+                    return Object.values(byId).map(({ name, count }) => (
+                      <BookingSidebarSummaryRow
+                        key={name}
+                        label={tb("summaryRoom")}
+                        value={count > 1 ? `${name} (×${count})` : name}
+                      />
+                    ));
+                  })()
+                : null}
+            </BookingSidebarSummarySection>
+          )}
+
+          {type === "hotel" && !hasHotelRooms ? (
+            <BookingSidebarSummarySection icon={<Building2 className="h-4 w-4" />} title={tb("rooms")}>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-muted-foreground">{tb("rooms")}</span>
+                <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-card">
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 text-muted-foreground hover:bg-muted disabled:opacity-40"
+                    disabled={rooms <= 1}
+                    onClick={() => setRooms((r) => Math.max(1, r - 1))}
+                    aria-label={tb("roomsDecreaseAria", { defaultValue: "Fewer rooms" })}
+                  >
+                    −
+                  </button>
+                  <span className="min-w-[2ch] text-center font-semibold tabular-nums text-foreground">
+                    {rooms}
+                  </span>
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 text-muted-foreground hover:bg-muted disabled:opacity-40"
+                    disabled={rooms >= 9}
+                    onClick={() => setRooms((r) => Math.min(9, r + 1))}
+                    aria-label={tb("roomsIncreaseAria", { defaultValue: "More rooms" })}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </BookingSidebarSummarySection>
+          ) : null}
+        </div>
 
         {/* Flight: Duffel bags & seats (detail page) or legacy placeholder extras */}
         {type === "flight" && flightOffer ? (
@@ -787,8 +909,9 @@ export function BookingSidebar({
           </div>
         ) : null}
 
-        {/* Price summary */}
-        <div className="pt-4 border-t border-border">
+        <hr className="border-border border-dashed" />
+
+        <div>
           {isChangeFlow && changeOffer && changeDelta !== null ? (
             <>
               {beforeChangeAmount ? (
@@ -849,54 +972,76 @@ export function BookingSidebar({
             </>
           ) : type === "flight" && flightOffer && duffelEstimates ? (
             <>
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{tb("fare")}</span>
-                <span className="font-semibold text-foreground">
-                  {formatPrice(duffelEstimates.base, flightOffer.total_currency, locale)}
-                </span>
-              </div>
-              {duffelEstimates.addOn > 0 ? (
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">{tb("selectedExtrasEst")}</span>
-                  <span className="font-semibold text-foreground">
-                    {formatPrice(duffelEstimates.addOn, flightOffer.total_currency, locale)}
+              <div className="mb-3 space-y-2">
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{tb("fare")}</span>
+                  <span className="font-medium text-foreground">
+                    {formatPrice(duffelEstimates.base, flightOffer.total_currency, locale)}
                   </span>
                 </div>
-              ) : null}
-              <div className="mt-4 flex items-end justify-between">
-                <span className="font-medium text-foreground">{tb("totalEst")}</span>
-                <span className="text-2xl font-bold text-primary">
+                {duffelEstimates.addOn > 0 ? (
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <span className="text-muted-foreground">{tb("selectedExtrasEst")}</span>
+                    <span className="font-medium text-foreground">
+                      {formatPrice(duffelEstimates.addOn, flightOffer.total_currency, locale)}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex items-end justify-between gap-2">
+                <span className="font-medium text-muted-foreground">{tb("totalEst")}</span>
+                <span className="text-3xl font-bold text-primary">
                   {formatPrice(duffelEstimates.total, flightOffer.total_currency, locale)}
                 </span>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">{tb("finalAmountDisclaimer")}</p>
+              <p className="mt-2 text-end text-xs text-muted-foreground">{tb("finalAmountDisclaimer")}</p>
             </>
           ) : (
             <>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-muted-foreground">{tb("price")}</span>
-                <span className="font-semibold text-foreground">{priceStrDisplay}</span>
+              {type === "flight" && flightOffer ? (
+                <div className="mb-3 flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{tCheckout("offerTotalLabel")}</span>
+                  <span className="font-medium text-foreground">
+                    {formatPrice(
+                      Number.parseFloat(flightOffer.total_amount),
+                      flightOffer.total_currency,
+                      locale,
+                    )}
+                  </span>
+                </div>
+              ) : type === "hotel" && (staysQuote?.totalAmount || totalRooms > 0) ? (
+                <div className="mb-3 flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{tCheckout("lineRoom")}</span>
+                  <span className="font-medium text-foreground">{priceStrDisplay}</span>
+                </div>
+              ) : (
+                <div className="mb-3 flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{tb("price")}</span>
+                  <span className="font-medium text-foreground">{priceStrDisplay}</span>
+                </div>
+              )}
+              <div className="flex items-end justify-between gap-2">
+                <span className="font-medium text-muted-foreground">{tCheckout("totalAmountLabel")}</span>
+                <span className="text-3xl font-bold text-primary">{priceStrDisplay}</span>
               </div>
-              <div className="mt-4 flex items-end justify-between">
-                <span className="font-medium text-foreground">{tb("total")}</span>
-                <span className="text-2xl font-bold text-primary">{priceStrDisplay}</span>
-              </div>
+              <p className="mt-2 text-end text-xs text-muted-foreground">
+                {type === "hotel" ? tCheckout("includesRoomTaxes") : tb("finalAmountDisclaimer")}
+              </p>
               {type === "hotel" && requiresStaysQuote && !staysQuote && totalRooms > 0 ? (
-                <p className="mt-2 text-xs text-muted-foreground">{tb("hotelQuotePaymentHint")}</p>
+                <p className="mt-1 text-end text-xs text-muted-foreground">{tb("hotelQuotePaymentHint")}</p>
               ) : null}
             </>
           )}
         </div>
 
-        {/* CTA */}
         <Button
           variant="primary"
           size="lg"
           className="w-full"
           onClick={handleProceedToPayment}
-          disabled={hotelMustPickRoom || hotelAwaitingStaysQuote}
+          disabled={hotelAwaitingStaysQuote || hotelProceedBusy}
         >
-          {type === "hotel" && staysQuoteLoading
+          {type === "hotel" && (hotelProceedBusy || staysQuoteLoading)
             ? tb("gettingQuote")
             : hotelMustPickRoom
               ? tb("selectRoom")
@@ -920,12 +1065,19 @@ export function BookingSidebar({
         <>
           <div
             dir={isRtl ? "rtl" : "ltr"}
-            className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-card/95 shadow-[0_-4px_24px_rgba(0,0,0,0.1)] backdrop-blur supports-[backdrop-filter]:bg-card/90 lg:hidden dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)]"
+            className="fixed bottom-14 left-0 right-0 z-40 border-t border-border bg-card/95 shadow-[0_-4px_24px_rgba(0,0,0,0.1)] backdrop-blur supports-[backdrop-filter]:bg-card/90 lg:hidden dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)]"
           >
             <div className="mx-auto w-full max-w-6xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5">
               <button
                 type="button"
-                onClick={() => setMobileBookingSheetOpen(true)}
+                onClick={() => {
+                  if (isHotel && hotelMustPickRoom) {
+                    setMobileBookingSheetOpen(false);
+                    scrollToHotelAvailableRooms();
+                    return;
+                  }
+                  setMobileBookingSheetOpen(true);
+                }}
                 className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-0.5 py-1 text-start transition-opacity hover:opacity-90 active:opacity-80"
                 aria-expanded={mobileBookingSheetOpen}
                 aria-label={isFlight ? tb("viewFlightAria") : tb("viewHotelAria")}
@@ -981,25 +1133,25 @@ export function BookingSidebar({
 /** Skeleton matching {@link BookingSidebar} chrome for detail-page loading states. */
 export function BookingSidebarSkeleton() {
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-lg" aria-hidden>
+    <div className="overflow-auto rounded-2xl border border-border bg-card shadow-sm dropdown-scrollbar max-h-[calc(100vh-6rem)]" aria-hidden>
       <div className="flex items-center gap-3 border-b border-border bg-muted px-6 py-4">
         <div className="h-6 w-6 shrink-0 animate-pulse rounded bg-muted-foreground/20" aria-hidden />
         <div className="h-5 w-40 animate-pulse rounded-md bg-muted-foreground/15" aria-hidden />
       </div>
-      <div className="space-y-5 p-4">
-        <div>
-          <div className="mb-2 h-4 w-28 animate-pulse rounded bg-muted-foreground/15" />
-          <div className="grid grid-cols-2 gap-2">
-            <div className="h-10 animate-pulse rounded-md border border-border/60 bg-muted/50" />
-            <div className="h-10 animate-pulse rounded-md border border-border/60 bg-muted/50" />
-          </div>
+      <div className="space-y-2 p-4">
+        <div className="space-y-2">
+          <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/15" />
+          <div className="h-6 w-full animate-pulse rounded-md bg-muted-foreground/15" />
+          <div className="h-4 w-3/4 animate-pulse rounded bg-muted-foreground/10" />
         </div>
-        <div>
-          <div className="mb-2 h-4 w-24 animate-pulse rounded bg-muted-foreground/15" />
-          <div className="flex gap-2">
-            <div className="h-10 flex-1 animate-pulse rounded-md bg-muted/50" />
-            <div className="h-10 flex-1 animate-pulse rounded-md bg-muted/50" />
-          </div>
+        <div className="space-y-3 rounded-lg border border-border/60 bg-muted/25 p-3">
+          <div className="h-4 w-32 animate-pulse rounded bg-muted-foreground/15" />
+          <div className="h-4 w-full animate-pulse rounded bg-muted-foreground/10" />
+          <div className="h-4 w-2/3 animate-pulse rounded bg-muted-foreground/10" />
+        </div>
+        <div className="space-y-3 rounded-lg border border-border/60 bg-muted/25 p-3">
+          <div className="h-4 w-28 animate-pulse rounded bg-muted-foreground/15" />
+          <div className="h-4 w-full animate-pulse rounded bg-muted-foreground/10" />
         </div>
         <div>
           <div className="mb-2 h-4 w-16 animate-pulse rounded bg-muted-foreground/15" />

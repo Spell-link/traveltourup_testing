@@ -24,6 +24,7 @@ import { readFlightOfferSnapshot, clearFlightOfferSnapshot } from "@/lib/flights
 import {
   getFlightOfferDeduped,
   getFlightSearchSessionParams,
+  getFlightSeatMapsDeduped,
   postFlightBooking,
   postFlightBookingValidate,
   postFlightPaymentIntent,
@@ -57,8 +58,9 @@ import {
 } from "@/components/flights/FlightBookingSuccessDialog";
 import { useLocale, useTranslations } from "next-intl";
 import { isRtlLocale } from "@/lib/i18n/rtl";
-import { parseIsoCurrencyAmountLine } from "@/lib/currency/format-display";
 import { useCurrency } from "@/components/providers/CurrencyProvider";
+import { resolveFlightCheckoutDisplayPricing } from "@/lib/flights/flight-checkout-display-pricing";
+import type { SeatMapDTO } from "@/lib/duffel/dto/seat-map.dto";
 import { Sheet, SheetContent, SheetTitle } from "@/components/admin_ui/ui/sheet";
 import { cn } from "@/lib/utils";
 import { readFlightSearchPath } from "@/lib/flights/flight-search-url-session";
@@ -97,6 +99,7 @@ export function FlightCheckoutDuffel({
   contactPrefill?: FlightCheckoutContactPrefill | null;
 }) {
   const t = useTranslations("Flights.checkout");
+  const tb = useTranslations("Booking.sidebar");
   const router = useRouter();
   const locale = useLocale();
   const isRtl = isRtlLocale(locale);
@@ -132,6 +135,7 @@ export function FlightCheckoutDuffel({
   const [step, setStep] = useState<CheckoutStep>("passengers");
   const [bagQuantities, setBagQuantities] = useState<Record<string, number>>({});
   const [seatSelections, setSeatSelections] = useState<Record<string, string>>({});
+  const [seatMaps, setSeatMaps] = useState<SeatMapDTO[] | null>(null);
   const [pricingError, setPricingError] = useState<string | null>(null);
   const [clientToken, setClientToken] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
@@ -298,6 +302,44 @@ export function FlightCheckoutDuffel({
       return next;
     });
   }, [offer]);
+
+  useEffect(() => {
+    if (!offer) return;
+    const hasSeatSelection = Object.values(seatSelections).some(Boolean);
+    const needsSeatMaps =
+      offer.available_services.length > 0 || hasSeatSelection;
+    if (!needsSeatMaps) {
+      setSeatMaps([]);
+      return;
+    }
+    let cancelled = false;
+    getFlightSeatMapsDeduped(offer.id)
+      .then((r) => {
+        if (!cancelled) setSeatMaps(r.seat_maps);
+      })
+      .catch(() => {
+        if (!cancelled) setSeatMaps(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [offer?.id, offer?.available_services.length, seatSelections]);
+
+  // useEffect(() => {
+  //   if (!offer || typeof window === "undefined") return;
+  //   try {
+  //     const payload: StoredFlightAncillaries = {
+  //       bagQuantities,
+  //       seatSelections,
+  //     };
+  //     sessionStorage.setItem(
+  //       flightAncillariesStorageKey(offer.id),
+  //       JSON.stringify(payload),
+  //     );
+  //   } catch {
+  //     /* ignore */
+  //   }
+  // }, [offer, bagQuantities, seatSelections]);
 
   const adultOptions = useMemo(() => {
     if (!offer) return [];
@@ -608,32 +650,42 @@ export function FlightCheckoutDuffel({
   const isSuccessHold =
     doneBooking?.status === "pending" && doneBooking?.payment_status === "unpaid";
 
+  const displayPricing = useMemo(
+    () =>
+      resolveFlightCheckoutDisplayPricing({
+        offer,
+        bagQuantities,
+        seatSelections,
+        seatMaps,
+        bookingDetailsPriceLine: bookingDetails?.price,
+        chargePricing,
+      }),
+    [offer, bagQuantities, seatSelections, seatMaps, bookingDetails?.price, chargePricing],
+  );
+
   const summaryPrimaryPrice = useMemo(() => {
-    if (chargePricing) {
-      const n = Number.parseFloat(chargePricing.amount);
-      if (Number.isFinite(n)) {
-        return formatPrice(n, chargePricing.currency, locale);
-      }
-    }
-    if (offer) {
-      const n = Number.parseFloat(offer.total_amount);
-      if (Number.isFinite(n)) {
-        return formatPrice(n, offer.total_currency, locale);
-      }
-    }
-    const parsedBooking = parseIsoCurrencyAmountLine(bookingDetails?.price);
-    if (parsedBooking) {
-      return formatPrice(parsedBooking.amount, parsedBooking.currency, locale);
-    }
-    return bookingDetails?.price ?? "â€”";
-  }, [chargePricing, bookingDetails?.price, offer, formatPrice, locale]);
+    if (!displayPricing) return bookingDetails?.price ?? "—";
+    return formatPrice(displayPricing.primaryAmount, displayPricing.currency, locale);
+  }, [displayPricing, bookingDetails?.price, formatPrice, locale]);
 
   const offerTotalDisplay = useMemo(() => {
-    if (!offer) return "â€”";
+    if (displayPricing) {
+      return formatPrice(displayPricing.base, displayPricing.currency, locale);
+    }
+    if (!offer) return "—";
     const n = Number.parseFloat(offer.total_amount);
     if (!Number.isFinite(n)) return `${offer.total_currency} ${offer.total_amount}`;
     return formatPrice(n, offer.total_currency, locale);
-  }, [offer, formatPrice, locale]);
+  }, [displayPricing, offer, formatPrice, locale]);
+
+  const extrasSubtotalDisplay = useMemo(() => {
+    if (!displayPricing || displayPricing.extrasSubtotal <= 0) return null;
+    return formatPrice(
+      displayPricing.extrasSubtotal,
+      displayPricing.currency,
+      locale,
+    );
+  }, [displayPricing, formatPrice, locale]);
 
   const chargedInDuffelFlight =
     offer && typeof offer.total_amount === "string"
@@ -649,7 +701,7 @@ export function FlightCheckoutDuffel({
   const renderOrderSummaryCard = (sticky: boolean) => (
     <div
       className={cn(
-        "overflow-hidden rounded-2xl border border-border bg-card shadow-sm",
+        "overflow-auto rounded-2xl border border-border bg-card shadow-sm dropdown-scrollbar max-h-[calc(100vh-6rem)]",
         sticky && "sticky top-24",
       )}
     >
@@ -667,7 +719,7 @@ export function FlightCheckoutDuffel({
             <p className="mt-1 text-sm text-muted-foreground">{bookingDetails.subtitle}</p>
           ) : null}
         </div>
-        <div className="mb-6 space-y-4">
+        <div className="mb-4 space-y-2">
           {summaryOptions.map((opt, i) => (
             <div key={`${opt.label}-${i}`} className="flex justify-between gap-2 text-sm">
               <span className="text-start text-muted-foreground">{opt.label}</span>
@@ -675,11 +727,17 @@ export function FlightCheckoutDuffel({
             </div>
           ))}
           <div className="flex justify-between gap-2 text-sm">
-            <span className="text-start text-muted-foreground">{t("offerTotalLabel")}</span>
+            <span className="text-start text-muted-foreground">{tb("fare")}</span>
             <span className="text-end font-medium text-foreground">{offerTotalDisplay}</span>
           </div>
+          {extrasSubtotalDisplay ? (
+            <div className="flex justify-between gap-2 text-sm">
+              <span className="text-start text-muted-foreground">{tb("selectedExtrasEst")}</span>
+              <span className="text-end font-medium text-foreground">{extrasSubtotalDisplay}</span>
+            </div>
+          ) : null}
         </div>
-        <hr className="my-4 border-border border-dashed" />
+        <hr className="my-2 border-border border-dashed" />
         <div className="mb-2 flex items-end justify-between gap-2">
           <span className="font-medium text-muted-foreground">{t("totalAmountLabel")}</span>
           <span className="text-3xl font-bold text-primary">{summaryPrimaryPrice}</span>
@@ -699,7 +757,7 @@ export function FlightCheckoutDuffel({
   if (loadError) {
     return (
       <div
-        className="mx-auto max-w-xl rounded-xl border border-destructive/40 bg-card p-6 text-center"
+        className="mx-auto max-w-xl rounded-xl border border-destructive/40 bg-card p-4 text-center"
         dir={isRtl ? "rtl" : "ltr"}
       >
         <p className="mb-4 font-medium text-destructive">{loadError}</p>
@@ -965,7 +1023,7 @@ export function FlightCheckoutDuffel({
         <>
           <div
             dir={isRtl ? "rtl" : "ltr"}
-            className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-card/95 shadow-[0_-4px_24px_rgba(0,0,0,0.1)] backdrop-blur supports-[backdrop-filter]:bg-card/90 lg:hidden dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)]"
+            className="fixed bottom-14 left-0 right-0 z-40 border-t border-border bg-card/95 shadow-[0_-4px_24px_rgba(0,0,0,0.1)] backdrop-blur supports-[backdrop-filter]:bg-card/90 lg:hidden dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)]"
           >
             <div className="mx-auto w-full max-w-6xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5">
               <button

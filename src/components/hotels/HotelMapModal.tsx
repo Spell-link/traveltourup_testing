@@ -83,11 +83,7 @@ export default function HotelMapModal({
           {hr("mapModalFootnote", { count: locations.length })}
         </p>
         <div className="min-h-[280px] flex-1 overflow-hidden p-4 sm:p-5">
-          <LeafletMap
-            locations={locations}
-            height="min(55vh, 480px)"
-            zoom={12}
-          />
+          <LeafletMap locations={locations} height="min(55vh, 480px)" zoom={12} />
         </div>
       </div>
     </div>

@@ -5,7 +5,6 @@ import { DetailPageLayout } from "@/components/shared/DetailPageLayout";
 import { BookingSidebar } from "@/components/shared/BookingSidebar";
 import { ReviewsSection } from "@/components/shared/ReviewsSection";
 import { CarDetailContent } from "@/components/cars/CarDetailContent";
-import { WishlistToggle } from "@/components/wishlist/WishlistToggle";
 import type { CarListing } from "@/types";
 
 export interface CarDetailProps {
@@ -33,15 +32,6 @@ export default function CarDetail({ car }: CarDetailProps) {
     <DetailPageLayout
       mainContent={
         <div>
-          <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-            <WishlistToggle
-              type="car"
-              refId={String(car.id)}
-              title={car.name}
-              subtitle={`${car.category} · ${car.location}`}
-              imageUrl={car.images?.[0] ?? null}
-            />
-          </div>
           <CarDetailContent car={car} />
         </div>
       }

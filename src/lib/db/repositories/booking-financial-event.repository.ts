@@ -60,6 +60,7 @@ function ledgerDirectionWhere(
 export type RecordBookingFinancialEventInput = {
   booking_id?: string | null;
   flight_payment_intent_record_id?: string | null;
+  checkout_payment_record_id?: string | null;
   type: BookingFinancialEventType;
   amount?: string | null;
   currency?: string | null;
@@ -82,6 +83,13 @@ export const bookingFinancialEventRepository = {
         ? {
             flightPaymentIntentRecord: {
               connect: { id: input.flight_payment_intent_record_id },
+            },
+          }
+        : {}),
+      ...(input.checkout_payment_record_id
+        ? {
+            checkoutPaymentRecord: {
+              connect: { id: input.checkout_payment_record_id },
             },
           }
         : {}),

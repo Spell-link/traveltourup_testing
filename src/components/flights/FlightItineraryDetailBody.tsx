@@ -34,6 +34,12 @@ export interface FlightItineraryDetailBodyProps {
   journeyMetaLine?: string;
   changePolicyText?: string;
   refundPolicyText?: string;
+  /** Round-trip / multi-city journey heading above the route title. */
+  journeyLabel?: string;
+  /** When false, hides the takeoff / duration / landing timeline block. Default true. */
+  showJourneyTimeline?: boolean;
+  /** When false, omits the Total row from the key grid (offer total shown elsewhere). Default true. */
+  showOfferSections?: boolean;
 }
 
 /**
@@ -49,6 +55,9 @@ export function FlightItineraryDetailBody({
   journeyMetaLine,
   changePolicyText,
   refundPolicyText,
+  journeyLabel,
+  showJourneyTimeline = true,
+  showOfferSections = true,
 }: FlightItineraryDetailBodyProps) {
   const tf = useTranslations("Flights.detail");
   const tc = useTranslations("Common");
@@ -70,8 +79,8 @@ export function FlightItineraryDetailBody({
     ? formatPrice(totalN, totalCur, locale)
     : formatPrice(flight.price, flight.currency ?? "USD", locale);
 
-  const keyDetails = useMemo(
-    () => [
+  const keyDetails = useMemo(() => {
+    const journeyRows = [
       {
         icon: <Building2 className="w-5 h-5" />,
         label: tf("labelAirline"),
@@ -121,14 +130,27 @@ export function FlightItineraryDetailBody({
               value: flight.amenities.map((a) => INFLIGHT_FEATURES[a]?.label ?? a).join(", "),
             },
           ]),
+    ];
+    if (!showOfferSections) return journeyRows;
+    return [
+      ...journeyRows,
       {
         icon: <Tag className="w-5 h-5" />,
         label: tf("labelTotal"),
         value: totalDisplay,
       },
-    ],
-    [flight, tf, tc, cabinLabel, totalDisplay, bookingMode, changePolicyText, refundPolicyText],
-  );
+    ];
+  }, [
+    flight,
+    tf,
+    tc,
+    cabinLabel,
+    totalDisplay,
+    bookingMode,
+    changePolicyText,
+    refundPolicyText,
+    showOfferSections,
+  ]);
 
   const features =
     !bookingMode && flight.amenities.length > 0
@@ -138,6 +160,11 @@ export function FlightItineraryDetailBody({
   return (
     <div className="space-y-8">
       <div>
+        {journeyLabel ? (
+          <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+            {journeyLabel}
+          </p>
+        ) : null}
         <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
           {flight.departureAirport} to {flight.arrivalAirport}
         </h1>
@@ -157,32 +184,34 @@ export function FlightItineraryDetailBody({
         </div>
       </div>
 
-      <div className="py-6 border-y border-border">
-        <div className="grid grid-cols-3 gap-4 text-center">
-          <div>
-            <div className="text-sm font-bold text-foreground mb-1">Flight Take off</div>
-            <div className="text-sm text-muted-foreground">{takeoffFull}</div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {flight.departureAirport} • T{flight.departureTerminal}
+      {showJourneyTimeline ? (
+        <div className="py-6 border-y border-border">
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <div className="text-sm font-bold text-foreground mb-1">Flight Take off</div>
+              <div className="text-sm text-muted-foreground">{takeoffFull}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {flight.departureAirport} • T{flight.departureTerminal}
+              </div>
+            </div>
+            <div className="flex flex-col items-center justify-center">
+              <Clock className="w-8 h-8 text-primary mb-2" />
+              <span className="font-bold text-foreground">{flight.duration}</span>
+            </div>
+            <div>
+              <div className="text-sm font-bold text-foreground mb-1">Flight Landing</div>
+              <div className="text-sm text-muted-foreground">{arrivalFull}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {flight.arrivalAirport} • T{flight.arrivalTerminal}
+              </div>
             </div>
           </div>
-          <div className="flex flex-col items-center justify-center">
-            <Clock className="w-8 h-8 text-primary mb-2" />
-            <span className="font-bold text-foreground">{flight.duration}</span>
-          </div>
-          <div>
-            <div className="text-sm font-bold text-foreground mb-1">Flight Landing</div>
-            <div className="text-sm text-muted-foreground">{arrivalFull}</div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {flight.arrivalAirport} • T{flight.arrivalTerminal}
-            </div>
-          </div>
+          <p className="text-center font-semibold text-foreground mt-4">Total flight time: {flight.duration}</p>
+          {journeyMetaLine ? (
+            <p className="mt-4 text-center text-xs text-muted-foreground">{journeyMetaLine}</p>
+          ) : null}
         </div>
-        <p className="text-center font-semibold text-foreground mt-4">Total flight time: {flight.duration}</p>
-        {journeyMetaLine ? (
-          <p className="mt-4 text-center text-xs text-muted-foreground">{journeyMetaLine}</p>
-        ) : null}
-      </div>
+      ) : null}
 
       {!bookingMode ? (
         <div>

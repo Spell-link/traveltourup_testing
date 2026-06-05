@@ -111,6 +111,9 @@ model User {
   last_name          String   @map("last_name")
   phone              String?
   phone_country_code String?  @map("phone_country_code")
+  phone_e164         String?  @unique @map("phone_e164") @db.VarChar(20)
+  phone_verified_at  DateTime? @map("phone_verified_at")
+  phone_verify_required Boolean @default(false) @map("phone_verify_required")
   country_code       String?  @map("country_code") @db.Char(3)
   currency_id        String   @default("USD") @map("currency_id") @db.VarChar(3)
   /// Path inside Storage bucket `user-uploads` (e.g. `{userId}/avatar`). Private; use signed URL to view.
@@ -123,31 +126,11 @@ model User {
   bookings                 Booking[]
   blog_posts               BlogPost[]
   flight_search_sessions   FlightSearchSession[]
-  wishlist_items           WishlistItem[]
+  checkout_payment_records CheckoutPaymentRecord[]
+  journey_events           CustomerJourneyEvent[]
+  product_interests        CustomerProductInterest[]
 
   @@map("users")
-}
-
-/// Saved catalog items per user (flight offer id, hotel/car route id, etc.).
-model WishlistItem {
-  id         String   @id @default(cuid())
-  user_id    String   @map("user_id") @db.Uuid
-  /// Vertical: flight | hotel | car (matches customer routes).
-  type       String   @map("wishlist_type") @db.VarChar(16)
-  ref_id     String   @map("ref_id") @db.VarChar(512)
-  title      String?  @db.Text
-  subtitle   String?  @db.Text
-  image_url  String?  @map("image_url") @db.Text
-  metadata   Json?
-  created_at DateTime @default(now()) @map("created_at")
-  updated_at DateTime @updatedAt @map("updated_at")
-
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([user_id, type, ref_id])
-  @@index([user_id])
-  @@index([user_id, type])
-  @@map("wishlist_items")
 }
 
 model Booking {
@@ -171,10 +154,74 @@ model Booking {
   carBooking           CarBooking?
   flightPaymentIntents FlightPaymentIntentRecord[]
   flightPaymentRefundAttempts FlightPaymentRefundAttempt[]
+  checkoutPaymentRecords CheckoutPaymentRecord[]
+  paymentRefundAttempts PaymentRefundAttempt[]
   financialEvents      BookingFinancialEvent[]
+  converted_from_interests CustomerProductInterest[]
 
   @@index([user_id, created_at])
   @@map("bookings")
+}
+
+/// Append-only customer funnel events (detail → checkout → payment → booking).
+model CustomerJourneyEvent {
+  id              String   @id @default(cuid())
+  user_id         String   @map("user_id") @db.Uuid
+  event_type      String   @map("event_type") @db.VarChar(64)
+  product_type    String   @map("product_type") @db.VarChar(16)
+  product_ref     String   @map("product_ref") @db.VarChar(512)
+  trip_unit_key   String?  @map("trip_unit_key") @db.VarChar(512)
+  funnel_stage    String   @map("funnel_stage") @db.VarChar(32)
+  properties      Json?
+  client_event_id String?  @map("client_event_id") @db.VarChar(64)
+  created_at      DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, client_event_id])
+  @@index([user_id, created_at])
+  @@index([product_type, product_ref])
+  @@index([user_id, trip_unit_key, created_at])
+  @@index([funnel_stage, created_at])
+  @@map("customer_journey_events")
+}
+
+/// Latest funnel stage per user × product — fast admin abandonment queries.
+model CustomerProductInterest {
+  id                    String    @id @default(cuid())
+  user_id               String    @map("user_id") @db.Uuid
+  product_type          String    @map("product_type") @db.VarChar(16)
+  product_ref           String    @map("product_ref") @db.VarChar(512)
+  trip_unit_key         String    @map("trip_unit_key") @db.VarChar(512)
+  funnel_stage          String    @map("funnel_stage") @db.VarChar(32)
+  title                 String?   @db.Text
+  subtitle              String?   @db.Text
+  price_amount          String?   @map("price_amount") @db.VarChar(24)
+  price_currency        String?   @map("price_currency") @db.VarChar(3)
+  origin_label          String?   @map("origin_label") @db.VarChar(128)
+  destination_label     String?   @map("destination_label") @db.VarChar(128)
+  start_date            String?   @map("start_date") @db.VarChar(10)
+  end_date              String?   @map("end_date") @db.VarChar(10)
+  travelers_summary     String?   @map("travelers_summary") @db.VarChar(128)
+  trip_type             String?   @map("trip_type") @db.VarChar(16)
+  search_context        Json?     @map("search_context")
+  first_seen_at         DateTime  @default(now()) @map("first_seen_at")
+  last_seen_at          DateTime  @default(now()) @map("last_seen_at")
+  last_event_type       String?   @map("last_event_type") @db.VarChar(64)
+  converted_booking_id  String?   @map("converted_booking_id")
+  abandoned_at          DateTime? @map("abandoned_at")
+
+  user               User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  converted_booking  Booking? @relation(fields: [converted_booking_id], references: [id], onDelete: SetNull)
+
+  @@unique([user_id, product_type, trip_unit_key])
+  @@index([user_id, last_seen_at])
+  @@index([product_type, product_ref])
+  @@index([funnel_stage, last_seen_at])
+  @@index([funnel_stage, start_date])
+  @@index([destination_label, last_seen_at])
+  @@index([converted_booking_id])
+  @@map("customer_product_interests")
 }
 
 /// Append-only money-moving event log for support, reconciliation, and the
@@ -191,13 +238,16 @@ model BookingFinancialEvent {
   payload                         Json?    @map("payload")
   /// Optional correlation id for tracing across HTTP + webhooks + cron.
   request_id                      String?  @map("request_id") @db.VarChar(64)
+  checkout_payment_record_id      String?  @map("checkout_payment_record_id")
   created_at                      DateTime @default(now()) @map("created_at")
 
   booking                   Booking?                   @relation(fields: [booking_id], references: [id], onDelete: SetNull)
   flightPaymentIntentRecord FlightPaymentIntentRecord? @relation(fields: [flight_payment_intent_record_id], references: [id], onDelete: SetNull)
+  checkoutPaymentRecord     CheckoutPaymentRecord?     @relation(fields: [checkout_payment_record_id], references: [id], onDelete: SetNull)
 
   @@index([booking_id, created_at])
   @@index([flight_payment_intent_record_id, created_at])
+  @@index([checkout_payment_record_id, created_at])
   @@index([type, created_at])
   @@map("booking_financial_events")
 }
@@ -458,6 +508,102 @@ model DuffelWebhookEvent {
   @@map("duffel_webhook_events")
 }
 
+/// Stripe (or future PSP) checkout payment records for hotels/cars.
+model CheckoutPaymentRecord {
+  id                         String   @id @default(cuid())
+  product_type               String   @map("product_type") @db.VarChar(16)
+  provider                   String   @default("stripe") @map("provider") @db.VarChar(24)
+  provider_intent_id         String   @unique @map("provider_intent_id") @db.VarChar(64)
+  supplier_ref_id            String   @map("supplier_ref_id") @db.VarChar(128)
+  user_id                    String   @map("user_id") @db.Uuid
+  supplier_amount            String   @map("supplier_amount") @db.VarChar(24)
+  supplier_currency          String   @map("supplier_currency") @db.VarChar(3)
+  markup_amount              String   @map("markup_amount") @db.VarChar(24)
+  commission_percent_applied String?  @map("commission_percent_applied") @db.VarChar(16)
+  markup_fixed_applied       String?  @map("markup_fixed_applied") @db.VarChar(24)
+  charge_amount              String   @map("charge_amount") @db.VarChar(24)
+  charge_currency            String   @map("charge_currency") @db.VarChar(3)
+  customer_currency_requested String? @map("customer_currency_requested") @db.VarChar(3)
+  charge_currency_fallback   Boolean  @default(false) @map("charge_currency_fallback")
+  fx_rate_applied            String?  @map("fx_rate_applied") @db.VarChar(24)
+  fx_snapshot_json           Json?    @map("fx_snapshot_json")
+  stripe_fee_rate            String?  @map("stripe_fee_rate") @db.VarChar(16)
+  client_secret              String   @map("client_secret") @db.Text
+  status                     String   @map("status") @db.VarChar(32)
+  booking_id                 String?  @map("booking_id")
+  idempotency_key            String?  @unique @map("idempotency_key")
+  quote_expires_at           DateTime? @map("quote_expires_at")
+  order_failure_at                        DateTime? @map("order_failure_at")
+  order_failure_booking_idempotency_key   String?   @unique @map("order_failure_booking_idempotency_key")
+  order_failure_code                      String?   @map("order_failure_code") @db.VarChar(64)
+  order_failure_refund_id                 String?   @map("order_failure_refund_id") @db.VarChar(64)
+  order_failure_refund_status             String?   @map("order_failure_refund_status") @db.VarChar(32)
+  created_at                 DateTime @default(now()) @map("created_at")
+  updated_at                 DateTime @updatedAt @map("updated_at")
+
+  user              User                      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  booking           Booking?                  @relation(fields: [booking_id], references: [id], onDelete: SetNull)
+  financialEvents   BookingFinancialEvent[]
+  refundAttempts    PaymentRefundAttempt[]
+  staysCancellation StaysBookingCancellation?
+
+  @@index([booking_id])
+  @@index([user_id, created_at])
+  @@index([status, updated_at])
+  @@index([supplier_ref_id])
+  @@map("checkout_payment_records")
+}
+
+/// Duffel stays booking cancellation audit row.
+model StaysBookingCancellation {
+  id                         String    @id @default(cuid())
+  hotel_booking_id           String    @map("hotel_booking_id")
+  checkout_payment_record_id String?   @unique @map("checkout_payment_record_id")
+  duffel_booking_id          String    @map("duffel_booking_id") @db.VarChar(64)
+  status                     String    @map("status") @db.VarChar(24)
+  refund_amount              String?   @map("refund_amount") @db.VarChar(24)
+  refund_currency            String?   @map("refund_currency") @db.VarChar(3)
+  customer_refund_amount     String?   @map("customer_refund_amount") @db.VarChar(24)
+  customer_refund_currency   String?   @map("customer_refund_currency") @db.VarChar(3)
+  confirmed_at               DateTime? @map("confirmed_at")
+  raw                        Json?     @map("raw")
+  created_at                 DateTime  @default(now()) @map("created_at")
+  updated_at                 DateTime  @updatedAt @map("updated_at")
+
+  hotelBooking           HotelBooking           @relation(fields: [hotel_booking_id], references: [id], onDelete: Cascade)
+  checkoutPaymentRecord  CheckoutPaymentRecord? @relation(fields: [checkout_payment_record_id], references: [id], onDelete: SetNull)
+  refundAttempt          PaymentRefundAttempt?
+
+  @@index([hotel_booking_id])
+  @@index([duffel_booking_id])
+  @@map("stays_booking_cancellations")
+}
+
+/// Generic PSP refund attempt (Stripe for stays/cars).
+model PaymentRefundAttempt {
+  id                         String   @id @default(cuid())
+  booking_id                 String   @map("booking_id")
+  checkout_payment_record_id String?  @map("checkout_payment_record_id")
+  stays_cancellation_id      String?  @unique @map("stays_cancellation_id")
+  provider                   String   @default("stripe") @map("provider") @db.VarChar(24)
+  provider_refund_id         String?  @unique @map("provider_refund_id") @db.VarChar(64)
+  amount                     String?  @map("amount") @db.VarChar(24)
+  currency                   String?  @map("currency") @db.VarChar(3)
+  status                     String   @map("status") @db.VarChar(24)
+  error_code                 String?  @map("error_code") @db.VarChar(120)
+  raw                        Json?    @map("raw")
+  created_at                 DateTime @default(now()) @map("created_at")
+  updated_at                 DateTime @updatedAt @map("updated_at")
+
+  booking                 Booking                  @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+  checkoutPaymentRecord   CheckoutPaymentRecord?   @relation(fields: [checkout_payment_record_id], references: [id], onDelete: SetNull)
+  staysCancellation       StaysBookingCancellation? @relation(fields: [stays_cancellation_id], references: [id], onDelete: SetNull)
+
+  @@index([booking_id])
+  @@index([status, updated_at])
+  @@map("payment_refund_attempts")
+}
+
 model HotelBooking {
   id         String   @id @default(cuid())
   booking_id String   @unique @map("booking_id")
@@ -472,10 +618,16 @@ model HotelBooking {
   accommodation_snapshot    Json?     @map("accommodation_snapshot")
   stays_raw                 Json?     @map("stays_raw")
 
+  confirmation_pdf_storage_path           String?   @map("confirmation_pdf_storage_path") @db.VarChar(512)
+  confirmation_pdf_generated_at           DateTime? @map("confirmation_pdf_generated_at")
+  confirmation_pdf_generation_failed_at     DateTime? @map("confirmation_pdf_generation_failed_at")
+  confirmation_pdf_error                  String?   @map("confirmation_pdf_error") @db.VarChar(500)
+
   created_at DateTime @default(now()) @map("created_at")
   updated_at DateTime @updatedAt @map("updated_at")
 
   booking Booking @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+  cancellations StaysBookingCancellation[]
 
   @@index([duffel_accommodation_id])
   @@map("hotel_bookings")

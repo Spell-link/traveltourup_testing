@@ -39,7 +39,7 @@ export function Modal({ isOpen, onClose, title, children, className = "" }: Moda
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? "modal-title" : undefined}
-        className={`relative bg-card rounded-xl shadow-xl border border-border max-h-[90vh] overflow-auto ${className}`}
+        className={`relative bg-card rounded-xl shadow-xl border border-border max-h-[90vh] overflow-auto dropdown-scrollbar ${className}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b border-border">

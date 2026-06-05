@@ -101,11 +101,11 @@ export const PERMISSION_REGISTRY = [
     description: "Delete cars",
   },
   {
-    id: "admin.wishlists:read",
-    resource: "admin.wishlists",
+    id: "admin.journey:read",
+    resource: "admin.journey",
     action: "read",
     category: "admin",
-    description: "View customer wishlists across users",
+    description: "View customer booking funnel and abandoned intents",
   },
   {
     id: "admin.blogs:read",

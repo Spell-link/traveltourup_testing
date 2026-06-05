@@ -8,9 +8,14 @@ import { getBooking } from "@/lib/http/bookings.client";
 import { BookingDetailLoading } from "@/components/bookings/BookingDetailSkeleton";
 import { useBookingBreadcrumbProfileBookingTitle } from "@/components/shared/BookingBreadcrumbProfileBookingContext";
 import { FlightBookingCancelPanel } from "@/components/bookings/FlightBookingCancelPanel";
+import {
+  HotelBookingCancelPanel,
+  HotelPaymentSummary,
+} from "@/components/bookings/HotelBookingCancelPanel";
 import { BookingFlightExtrasPanel } from "@/components/bookings/BookingFlightExtrasPanel";
 import { BookingFlightItineraryDetail } from "@/components/bookings/BookingFlightItineraryDetail";
 import { FlightOrderDetailView } from "@/components/bookings/FlightOrderDetailView";
+import { HotelOrderDetailView } from "@/components/bookings/HotelOrderDetailView";
 import { FlightFinancialTimelinePanel } from "@/components/bookings/FlightFinancialTimelinePanel";
 import { useLocale, useTranslations } from "next-intl";
 import { useCurrency } from "@/components/providers/CurrencyProvider";
@@ -204,6 +209,12 @@ function flightPaymentCopy(
   };
 }
 
+function hotelUsesRichDetailView(row: BookingDetailDto): boolean {
+  if (row.type !== "hotel" || !row.hotel_booking) return false;
+  if (row.status !== "confirmed" && row.status !== "cancelled") return false;
+  return Boolean(row.hotel_booking.stays_raw ?? row.hotel_booking.accommodation_snapshot);
+}
+
 export function BookingDetailView({
   bookingId,
   backHref = "/profile/bookings",
@@ -278,6 +289,7 @@ export function BookingDetailView({
         : "";
 
   const flightPay = row.type === "flight" ? flightPaymentCopy(tMoney, row.payment_status) : null;
+  const hotelPay = row.type === "hotel" ? flightPaymentCopy(tMoney, row.payment_status) : null;
 
   const refreshBooking = async () => {
     const b = await getBooking(bookingId);
@@ -292,6 +304,20 @@ export function BookingDetailView({
           bookingId={bookingId}
           showAdminTicketTools={showAdminTicketTools}
           paymentStatusLabel={flightPay?.label}
+          onRefresh={refreshBooking}
+        />
+      </div>
+    );
+  }
+
+  if (hotelUsesRichDetailView(row)) {
+    return (
+      <div className="space-y-4">
+        <HotelOrderDetailView
+          row={row}
+          bookingId={bookingId}
+          showAdminVoucherTools={showAdminTicketTools}
+          paymentStatusLabel={hotelPay?.label}
           onRefresh={refreshBooking}
         />
       </div>
@@ -375,6 +401,19 @@ export function BookingDetailView({
         </>
       ) : null}
       {row.hotel_booking ? <HotelSections hb={row.hotel_booking} /> : null}
+      {row.type === "hotel" && row.hotel_booking && row.status !== "confirmed" ? (
+        <>
+          <HotelPaymentSummary guestData={row.guest_data} />
+          <HotelBookingCancelPanel
+            bookingId={row.id}
+            bookingRefNo={row.booking_ref_no}
+            status={row.status}
+            paymentStatus={row.payment_status}
+            hasDuffelBooking={Boolean(row.hotel_booking.duffel_booking_id)}
+            onBookingRefresh={refreshBooking}
+          />
+        </>
+      ) : null}
       {row.car_booking ? <CarSections cb={row.car_booking} /> : null}
       {row.guest_data ? <GuestDetails guest={row.guest_data} /> : null}
     </div>

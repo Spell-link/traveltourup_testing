@@ -89,7 +89,6 @@ const en = {
     account: "Account",
     profile: "Profile",
     bookings: "Bookings",
-    wishlists: "Wishlists",
     adminConsole: "Admin console",
     logout: "Log out",
     login: "Log in",
@@ -436,6 +435,7 @@ const en = {
       aboutHotelHeading: "About {name}",
       aboutLocationTitle: "Location",
       sectionDeals: "Deals",
+      redirectToHotelsCountdown: "Booking expires in {time}.",
     },
   },
   Cars: {

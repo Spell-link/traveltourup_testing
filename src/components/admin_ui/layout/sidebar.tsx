@@ -22,7 +22,7 @@ import {
   CalendarCheck,
   Users,
   Shield,
-  Heart,
+  Route,
 } from "lucide-react"
 import { ResizableSidebar } from "../shared/resizable-sidebar"
 
@@ -156,6 +156,12 @@ const menuItems: MenuSection[] = [
         icon: CalendarCheck,
         badge: null,
       },
+      {
+        title: "Customer journey",
+        href: "/admin/journey",
+        icon: Route,
+        badge: null,
+      },
      
     ],
   },
@@ -183,11 +189,6 @@ const menuItems: MenuSection[] = [
             icon: Plus,
             allowedResource: "admin.users",
             allowedActions: ["write"],
-          },
-          {
-            title: "Wishlists",
-            href: "/admin/wishlists",
-            icon: Heart,
           },
         ],
       },
@@ -314,7 +315,7 @@ export const Sidebar = memo(function Sidebar({ className }: SidebarProps) {
     setMobileOpen(false)
   }, [pathname])
 
-  // Open parent sections when the current route matches a sub-item (e.g. Wishlists under Users)
+  // Open parent sections when the current route matches a sub-item (e.g. New user under Users)
   useEffect(() => {
     if (!pathname) return
     for (const section of menuItems) {

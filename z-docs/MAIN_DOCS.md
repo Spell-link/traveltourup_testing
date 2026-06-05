@@ -210,3 +210,13 @@ so i want the complete and solid and professional planning md file which should 
 make sure explain each and every things in professional and in this way so i will explain and he can understand in the easy way and nothings should be massive and every things should be clear 
 
 and also he can also use to give the cursor ai so that cursor will follow the same flow and stucture to create the new module like the car module according to current structure and flow of this project in the generic way for each and every things like for api ,db, validation,client side,admin side and for frontend for both (client and admin) by following the current follow for each
+
+
+
+
+### Hotels related issue lists:
+
+
+also exlore the current flight module implementation for flight booking detail  and than check and explore the current implementation of hotel booking detail along with  official documentation of duffel for hotel booking detail from the internet completely and than create the professional and solid planning for enhancement of bokking detail page for hotel by following the flights module for this one 
+
+and than also check this given image from the duffel dashboard for stays booking page for presentation of the stays booking detail in the professional way 

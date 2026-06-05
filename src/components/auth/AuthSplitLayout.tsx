@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import NextLink from "next/link";
 import { Link } from "@/i18n/navigation";
 import { AuthVideo } from "./AuthVideo";
+import { AuthFormScrollPane } from "./AuthFormScrollPane";
 import { SITE_NAME } from "@/config/brand";
 import { ADMIN_GATE_LOCALE } from "@/i18n/routing";
 
@@ -75,11 +76,7 @@ export function AuthSplitLayout({ children, variant, adminGate = false }: AuthSp
           <p className="text-base font-bold tracking-tight text-white drop-shadow-md ">{SITE_NAME}</p>
         </div>
 
-        <div className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col justify-center overflow-y-auto overscroll-y-contain px-4 py-4 md:px-8 lg:py-8 xl:px-12 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
-          <div className="w-full rounded-2xl border border-white/25 bg-card/93 p-5 shadow-2xl backdrop-blur-md sm:p-6 md:p-7 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
-            {children}
-          </div>
-        </div>
+        <AuthFormScrollPane>{children}</AuthFormScrollPane>
       </section>
     </div>
   );

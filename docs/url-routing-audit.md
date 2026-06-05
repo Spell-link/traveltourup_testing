@@ -47,9 +47,7 @@ Static and dynamic routes discovered:
 | `/forgot-password` | `app/(auth)/forgot-password/page.tsx` |
 | `/auth/update-password` | `app/auth/update-password/page.tsx` |
 | `/auth/callback` | `app/auth/callback/route.ts` (route handler, not `page.tsx`) |
-| `/admin` … | `app/(admin)/admin/...` (dashboard, users, roles, blogs, bookings, cars, flights, hotels, wishlists) |
-| `/email-test` | `app/email-test/page.tsx` |
-| `/wishlists` | `app/wishlists/page.tsx` |
+| `/admin` … | `app/(admin)/admin/...` (dashboard, users, roles, blogs, bookings, cars, flights, hotels) |
 | `/robots.txt`, `/sitemap.xml` | App route handlers if present (see build output) |
 
 ### Dynamic route params — meaning
@@ -106,7 +104,6 @@ Next.js 15+ async API: `params` is often typed as `Promise<{ ... }>` and **await
 | `app/(marketing)/profile/bookings/page.tsx` | `highlight` | Scroll/highlight booking ref |
 | `app/(admin)/admin/users/page.tsx` | Admin list filters (via `sp`) | Table filters |
 | `app/(admin)/admin/blogs/page.tsx` | Blog list filters | Admin blog list |
-| `app/(admin)/admin/wishlists/page.tsx` | Wishlist filters | Admin list |
 
 ### Client — `useSearchParams()`
 
@@ -236,7 +233,7 @@ HotelsList reads sessionStorage + listens to TTU_STAYS_SEARCH_UPDATED_EVENT
   - Auth pages: logged-in user → redirect to `next` query (cleared) or safe internal path.
   - Protected `/admin`, `/profile`: unauthenticated → `/login?next=<pathname>`.
 - **`app/auth/callback/route.ts`**: OAuth `code`, `next` query handling.
-- **App pages**: `redirect()` in many server pages (login gates, `wishlists` → profile tab).
+- **App pages**: `redirect()` in many server pages (login gates).
 
 *(Next.js may wire `proxy.ts` as the framework entry for edge middleware; confirm in your Next 16 docs.)*
 

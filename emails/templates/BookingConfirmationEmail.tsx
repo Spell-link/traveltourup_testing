@@ -31,6 +31,16 @@ export type BookingConfirmationEmailProps = {
   statusNote?: string;
   /** True when the itinerary PDF is attached to this email. */
   itineraryAttached?: boolean;
+  /** Hotel: multiline guest list with optional DOB per guest. */
+  guestsDetail?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  specialRequests?: string;
+  loyaltyProgrammeAccountNumber?: string;
+  billingRoom?: string;
+  billingServiceFee?: string;
+  billingTotalPaid?: string;
+  billingPayAtHotel?: string;
 };
 
 const INK = "#111827";
@@ -88,14 +98,31 @@ export default function BookingConfirmationEmail({
   dates,
   total,
   manageUrl,
+  productLabel,
   airlineRecordLocator,
   passengersSummary,
   statusNote,
   itineraryAttached,
+  guestsDetail,
+  contactEmail,
+  contactPhone,
+  specialRequests,
+  loyaltyProgrammeAccountNumber,
+  billingRoom,
+  billingServiceFee,
+  billingTotalPaid,
+  billingPayAtHotel,
 }: BookingConfirmationEmailProps) {
-  const ticketLines = airlineRecordLocator
-    ? ticketNumberLines(passengersSummary, guestName, airlineRecordLocator)
-    : [];
+  const isHotel = productLabel === "Hotel";
+  const ticketLines =
+    !isHotel && airlineRecordLocator
+      ? ticketNumberLines(passengersSummary, guestName, airlineRecordLocator)
+      : [];
+
+  const detailsHeading = isHotel ? "Hotel details" : "Flight details";
+  const travelersHeading = isHotel ? "Guests" : "Passengers";
+  const travelersLabel = isHotel ? "Guest names" : "Travelers";
+  const confirmationHeading = isHotel ? "Hotel confirmation" : "Ticket numbers";
 
   return (
     <Html lang="en">
@@ -159,7 +186,7 @@ export default function BookingConfirmationEmail({
               </Section>
             ) : null}
 
-            <SectionHeading>Flight details</SectionHeading>
+            <SectionHeading>{detailsHeading}</SectionHeading>
             <PanelBox>
               <Text className="m-0 text-[15px] font-bold leading-snug" style={{ color: INK }}>
                 {destination}
@@ -172,15 +199,29 @@ export default function BookingConfirmationEmail({
               </Text>
             </PanelBox>
 
-            {passengersSummary ? (
+            {isHotel && guestsDetail ? (
               <>
-                <SectionHeading>Passengers</SectionHeading>
+                <SectionHeading>{travelersHeading}</SectionHeading>
+                <PanelBox>
+                  <Text
+                    className="m-0 whitespace-pre-line text-[14px] leading-relaxed"
+                    style={{ color: INK }}
+                  >
+                    {guestsDetail}
+                  </Text>
+                </PanelBox>
+              </>
+            ) : null}
+
+            {!isHotel && passengersSummary ? (
+              <>
+                <SectionHeading>{travelersHeading}</SectionHeading>
                 <PanelBox>
                   <Text
                     className="m-0 text-[10px] font-semibold uppercase tracking-wide"
                     style={{ color: MUTED }}
                   >
-                    Travelers
+                    {travelersLabel}
                   </Text>
                   <Text className="m-0 mt-1 text-[14px] font-bold leading-snug" style={{ color: INK }}>
                     {passengersSummary}
@@ -189,9 +230,67 @@ export default function BookingConfirmationEmail({
               </>
             ) : null}
 
+            {isHotel && !guestsDetail && passengersSummary ? (
+              <>
+                <SectionHeading>{travelersHeading}</SectionHeading>
+                <PanelBox>
+                  <Text className="m-0 mt-1 text-[14px] font-bold leading-snug" style={{ color: INK }}>
+                    {passengersSummary}
+                  </Text>
+                </PanelBox>
+              </>
+            ) : null}
+
+            {isHotel && (contactEmail || contactPhone) ? (
+              <>
+                <SectionHeading>Contact</SectionHeading>
+                <PanelBox>
+                  {contactEmail ? (
+                    <Text className="m-0 text-[13px] leading-relaxed" style={{ color: INK }}>
+                      Email: {contactEmail}
+                    </Text>
+                  ) : null}
+                  {contactPhone ? (
+                    <Text className="m-0 mt-1 text-[13px] leading-relaxed" style={{ color: INK }}>
+                      Phone: {contactPhone}
+                    </Text>
+                  ) : null}
+                </PanelBox>
+              </>
+            ) : null}
+
+            {isHotel && (specialRequests || loyaltyProgrammeAccountNumber) ? (
+              <>
+                <SectionHeading>Additional information</SectionHeading>
+                <PanelBox>
+                  {specialRequests ? (
+                    <Text className="m-0 text-[13px] leading-relaxed" style={{ color: INK }}>
+                      Special requests: {specialRequests}
+                    </Text>
+                  ) : null}
+                  {loyaltyProgrammeAccountNumber ? (
+                    <Text className="m-0 mt-2 text-[13px] leading-relaxed" style={{ color: INK }}>
+                      Loyalty programme: {loyaltyProgrammeAccountNumber}
+                    </Text>
+                  ) : null}
+                </PanelBox>
+              </>
+            ) : null}
+
+            {isHotel && airlineRecordLocator ? (
+              <>
+                <SectionHeading>{confirmationHeading}</SectionHeading>
+                <PanelBox>
+                  <Text className="m-0 text-[14px] font-bold leading-snug" style={{ color: INK }}>
+                    {airlineRecordLocator}
+                  </Text>
+                </PanelBox>
+              </>
+            ) : null}
+
             {ticketLines.length > 0 ? (
               <>
-                <SectionHeading>Ticket numbers</SectionHeading>
+                <SectionHeading>{confirmationHeading}</SectionHeading>
                 <PanelBox>
                   {ticketLines.map((line) => (
                     <Text
@@ -206,32 +305,78 @@ export default function BookingConfirmationEmail({
               </>
             ) : null}
 
-            <Section
-              className="mt-6 rounded-lg border border-solid px-4 py-3"
-              style={{ borderColor: BORDER, backgroundColor: PANEL }}
-            >
-              <Text className="m-0 text-[11px] leading-snug" style={{ color: MUTED }}>
-                Total
-              </Text>
-              <Text className="m-0 mt-0.5 text-[18px] font-bold leading-tight" style={{ color: INK }}>
-                {total}
-              </Text>
-            </Section>
+            {isHotel && (billingRoom || billingServiceFee || billingTotalPaid) ? (
+              <>
+                <SectionHeading>Payment summary</SectionHeading>
+                <PanelBox>
+                  {billingRoom ? (
+                    <Text className="m-0 text-[13px] leading-relaxed" style={{ color: INK }}>
+                      Room rate: {billingRoom}
+                    </Text>
+                  ) : null}
+                  {billingServiceFee ? (
+                    <Text className="m-0 mt-1 text-[13px] leading-relaxed" style={{ color: INK }}>
+                      Service fee: {billingServiceFee}
+                    </Text>
+                  ) : null}
+                  {billingTotalPaid ? (
+                    <Text className="m-0 mt-2 text-[15px] font-bold leading-snug" style={{ color: INK }}>
+                      Total paid: {billingTotalPaid}
+                    </Text>
+                  ) : null}
+                  {billingPayAtHotel ? (
+                    <Text className="m-0 mt-2 text-[12px] leading-relaxed" style={{ color: MUTED }}>
+                      Due at accommodation (not charged to your card): {billingPayAtHotel}
+                    </Text>
+                  ) : null}
+                </PanelBox>
+              </>
+            ) : (
+              <Section
+                className="mt-6 rounded-lg border border-solid px-4 py-3"
+                style={{ borderColor: BORDER, backgroundColor: PANEL }}
+              >
+                <Text className="m-0 text-[11px] leading-snug" style={{ color: MUTED }}>
+                  Total
+                </Text>
+                <Text className="m-0 mt-0.5 text-[18px] font-bold leading-tight" style={{ color: INK }}>
+                  {total}
+                </Text>
+              </Section>
+            )}
 
             <Section className="mt-8">
               <Text className="m-0 text-center text-[11px] leading-relaxed" style={{ color: MUTED }}>
-                This email is your booking confirmation
-                {itineraryAttached ? " — your printable itinerary PDF is attached" : ""}. It is not a
-                boarding pass.
-                {airlineRecordLocator ? (
+                {isHotel ? (
                   <>
-                    {" "}
-                    Check in with airline record locator (PNR){" "}
-                    <span style={{ color: INK, fontWeight: 600 }}>{airlineRecordLocator}</span>.
+                    This email is your hotel booking confirmation.
+                    {airlineRecordLocator ? (
+                      <>
+                        {" "}
+                        Present confirmation number{" "}
+                        <span style={{ color: INK, fontWeight: 600 }}>{airlineRecordLocator}</span> at
+                        check-in.
+                      </>
+                    ) : (
+                      " Present it at check-in along with photo ID."
+                    )}
                   </>
-                ) : null}
+                ) : (
+                  <>
+                    This email is your booking confirmation
+                    {itineraryAttached ? " — your printable itinerary PDF is attached" : ""}. It is not a
+                    boarding pass.
+                    {airlineRecordLocator ? (
+                      <>
+                        {" "}
+                        Check in with airline record locator (PNR){" "}
+                        <span style={{ color: INK, fontWeight: 600 }}>{airlineRecordLocator}</span>.
+                      </>
+                    ) : null}
+                  </>
+                )}
               </Text>
-              {itineraryAttached ? (
+              {itineraryAttached && !isHotel ? (
                 <Text className="m-0 mt-2 text-center text-[11px] leading-relaxed" style={{ color: MUTED }}>
                   You can download the same itinerary PDF anytime from{" "}
                   {manageUrl ? (

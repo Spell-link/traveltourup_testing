@@ -6,7 +6,7 @@ import { FeaturedFlightsShell } from "@/components/flights/FeaturedFlightsShell"
 import { FeaturedFlightsGridSkeleton } from "@/components/flights/FlightSkeletons";
 import { FeaturedFlightsGrid } from "@/components/flights/FeaturedFlightsGrid";
 
-type Props = { bgColor?: string };
+type Props = { bgColor?: string, mainPading?: string };
 
 async function FeaturedFlightsCardsFromServer() {
   const cards = await getCachedFeaturedFlightCards();
@@ -17,10 +17,11 @@ async function FeaturedFlightsCardsFromServer() {
  * Server component: section chrome and hero render immediately; cached offers stream inside Suspense.
  * From `"use client"` pages, use {@link FeaturedFlightsWithFetch} or `GET /api/v1/flights/featured`.
  */
-export default function FeaturedFlights({ bgColor = "bg-muted" }: Props) {
+export default function FeaturedFlights({ bgColor = "bg-muted", mainPading = "py-10" }: Props) {
   return (
     <FeaturedFlightsShell
       bgColor={bgColor}
+      mainPading={mainPading}
       cardsSlot={
         <Suspense fallback={<FeaturedFlightsGridSkeleton />}>
           <FeaturedFlightsCardsFromServer />

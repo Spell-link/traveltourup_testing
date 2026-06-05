@@ -1496,7 +1496,7 @@ Use these as visual references when building screens. Do NOT copy directly — e
 | **Hopper**              | iOS / Android    | Flight price prediction UI, calendar date picker UX, booking flow simplicity              |
 | **Skyscanner**          | iOS / Android    | Flight search results layout, filter bottom sheet, price chart, multi-city flow           |
 | **Booking.com**         | iOS / Android    | Hotel listing card design, map integration, review display, property gallery              |
-| **Airbnb**              | iOS / Android    | Search UX, image carousels, wishlist interaction, bottom sheet filters, smooth animations |
+| **Airbnb**              | iOS / Android    | Search UX, image carousels, bottom sheet filters, smooth animations |
 | **Google Flights**      | Web (responsive) | Clean search form, timeline view for flights, price graph, "track prices" UX              |
 | **Kayak**               | iOS / Android    | Price comparison layout, car rental flow, combined flight+hotel search                    |
 | **Wise (TransferWise)** | iOS / Android    | Auth flow UX (biometrics, PIN), clean form design, success states                         |

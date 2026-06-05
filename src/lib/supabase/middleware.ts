@@ -1,28 +1,33 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { pathnameStartsWithLocale, stripLocalePrefix } from "@/i18n/locale-path";
+import { isPhoneVerificationPending } from "@/lib/auth/phone-verification.core";
 import { ADMIN_GATE_LOCALE, defaultLocale } from "@/i18n/routing";
 import { safeInternalPath } from "@/lib/auth/redirect";
 
-const AUTH_PATH_PREFIXES = ["/login", "/signup", "/forgot-password"] as const;
+const AUTH_PATH_PREFIXES = ["/login", "/signup", "/forgot-password", "/verify-phone"] as const;
 const PROTECTED_CUSTOMER_PREFIXES = ["/profile"] as const;
 
 function isAuthInnerPath(inner: string): boolean {
   return AUTH_PATH_PREFIXES.some((p) => inner === p || inner.startsWith(`${p}/`));
 }
 
+function isVerifyPhonePath(inner: string): boolean {
+  return inner === "/verify-phone" || inner.startsWith("/verify-phone/");
+}
+
 function isProtectedCustomerInner(inner: string): boolean {
   return PROTECTED_CUSTOMER_PREFIXES.some((p) => inner === p || inner.startsWith(`${p}/`));
 }
 
+function copyCookies(from: NextResponse, to: NextResponse) {
+  from.cookies.getAll().forEach((cookie) => {
+    to.cookies.set(cookie.name, cookie.value);
+  });
+}
+
 /**
  * Refreshes the Supabase session cookie on each matched request.
- *
- * Guards:
- *  - Authenticated users on auth pages → redirect to `next` (or home).
- *  - Unauthenticated users on /admin or /[locale]/profile → login with `next`.
- *
- * Role-based authorization (admin vs non-admin) is handled by layouts — proxy stays DB-free.
  */
 export async function updateSupabaseSession(request: NextRequest, upstreamResponse?: NextResponse) {
   let response = upstreamResponse ?? NextResponse.next({ request });
@@ -53,12 +58,28 @@ export async function updateSupabaseSession(request: NextRequest, upstreamRespon
 
   const pathname = request.nextUrl.pathname;
   const inner = stripLocalePrefix(pathname);
+  const locale = pathnameStartsWithLocale(pathname) ?? defaultLocale;
 
   const isAuthPage = isAuthInnerPath(inner);
+  const isVerifyPhone = isVerifyPhonePath(inner);
   const isAdminArea = pathname === "/admin" || pathname.startsWith("/admin/");
   const isProtectedCustomer = isProtectedCustomerInner(inner);
+  const phonePending = user ? isPhoneVerificationPending(user) : false;
+
+  if (user && phonePending && !isVerifyPhone && !isAdminArea && !pathname.startsWith("/api/")) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = `/${locale}/verify-phone`;
+    redirectUrl.searchParams.set("next", `${inner}${request.nextUrl.search}`);
+    const redirectResponse = NextResponse.redirect(redirectUrl);
+    copyCookies(response, redirectResponse);
+    return redirectResponse;
+  }
 
   if (user && isAuthPage) {
+    if (isVerifyPhone && phonePending) {
+      return response;
+    }
+
     const rawNext = request.nextUrl.searchParams.get("next") ?? undefined;
     const next = safeInternalPath(rawNext);
     const qIndex = next.indexOf("?");
@@ -68,9 +89,7 @@ export async function updateSupabaseSession(request: NextRequest, upstreamRespon
     redirectUrl.pathname = pathOnly || "/";
     redirectUrl.search = search;
     const redirectResponse = NextResponse.redirect(redirectUrl);
-    response.cookies.getAll().forEach((cookie) => {
-      redirectResponse.cookies.set(cookie.name, cookie.value);
-    });
+    copyCookies(response, redirectResponse);
     return redirectResponse;
   }
 
@@ -79,9 +98,7 @@ export async function updateSupabaseSession(request: NextRequest, upstreamRespon
     redirectUrl.pathname = `/${ADMIN_GATE_LOCALE}/login`;
     redirectUrl.searchParams.set("next", pathname);
     const redirectResponse = NextResponse.redirect(redirectUrl);
-    response.cookies.getAll().forEach((cookie) => {
-      redirectResponse.cookies.set(cookie.name, cookie.value);
-    });
+    copyCookies(response, redirectResponse);
     return redirectResponse;
   }
 
@@ -91,9 +108,7 @@ export async function updateSupabaseSession(request: NextRequest, upstreamRespon
     redirectUrl.pathname = `/${loc}/login`;
     redirectUrl.searchParams.set("next", pathname);
     const redirectResponse = NextResponse.redirect(redirectUrl);
-    response.cookies.getAll().forEach((cookie) => {
-      redirectResponse.cookies.set(cookie.name, cookie.value);
-    });
+    copyCookies(response, redirectResponse);
     return redirectResponse;
   }
 

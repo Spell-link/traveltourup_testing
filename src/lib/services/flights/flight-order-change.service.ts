@@ -39,6 +39,10 @@ import {
   FlightCaptureError,
 } from "@/lib/services/flights/flight-payment-capture.core";
 import { sendFlightOrderChangeEmailSafe } from "@/lib/services/flights/flight-emails.service";
+import {
+  trackBookingChangeStartedJourney,
+  trackBookingChangedJourney,
+} from "@/lib/services/journey/booking-lifecycle-journey.service";
 import type {
   FlightOrderChangeConfirmBody,
   FlightOrderChangePaymentIntentBody,
@@ -588,6 +592,16 @@ export async function requestOrderChangeQuote(input: {
     },
   });
 
+  trackBookingChangeStartedJourney({
+    bookingId: row.id,
+    properties: {
+      booking_ref_no: row.booking_ref_no,
+      flight_order_change_id: persisted.id,
+      duffel_order_change_request_id: parsed.id,
+      offer_count: parsed.order_change_offers.length,
+    },
+  });
+
   return {
     id: persisted.id,
     status: persisted.status,
@@ -926,6 +940,18 @@ export async function confirmOrderChangeForBooking(input: {
     },
   });
 
+  trackBookingChangedJourney({
+    bookingId: row.id,
+    priceAmount: confirmedParsed.change_total_amount,
+    priceCurrency: confirmedParsed.change_total_currency,
+    properties: {
+      booking_ref_no: row.booking_ref_no,
+      duffel_order_change_id: confirmedParsed.id,
+      duffel_order_change_request_id: change.duffel_order_change_request_id,
+      paid: needsPayment,
+    },
+  });
+
   await sendFlightOrderChangeEmailSafe({
     booking: row,
     changeAmount: confirmedParsed.change_total_amount,
@@ -942,6 +968,28 @@ export async function confirmOrderChangeForBooking(input: {
     confirmed_at: confirmedParsed.confirmed_at ?? new Date().toISOString(),
     needs_payment: needsPayment,
   };
+}
+
+async function resolveAuthoritativeFlightTripTotal(input: {
+  duffelOrderId: string;
+  changeRaw: unknown | null;
+  confirmedOfferId: string | null;
+}): Promise<{ amount: string; currency: string } | null> {
+  try {
+    const fresh = await getDuffelOrder(input.duffelOrderId);
+    const data = unwrap(fresh);
+    const amount = typeof data.total_amount === "string" ? data.total_amount : null;
+    const currency = typeof data.total_currency === "string" ? data.total_currency : null;
+    if (amount && currency) return { amount, currency };
+  } catch {
+    // fall through to stored offer quote
+  }
+
+  if (input.changeRaw && input.confirmedOfferId) {
+    return findOrderChangeOfferNewTotal(input.changeRaw, input.confirmedOfferId);
+  }
+
+  return null;
 }
 
 /** Backfill booking total / order_raw when a change was confirmed before totals were synced. */
@@ -962,44 +1010,60 @@ export async function reconcileFlightBookingTotalFromConfirmedChange(
     typeof quoteRaw._confirmed_offer_id === "string"
       ? quoteRaw._confirmed_offer_id
       : null;
-  let newTripTotal = offerId
-    ? findOrderChangeOfferNewTotal(change.raw, offerId)
-    : null;
-  if (!newTripTotal && change.change_amount && change.change_currency) {
-    const base = Number.parseFloat(String(row.total_amount));
-    const delta = Number.parseFloat(change.change_amount);
-    if (Number.isFinite(base) && Number.isFinite(delta)) {
-      newTripTotal = {
-        amount: (base + delta).toFixed(2),
-        currency: change.change_currency,
-      };
-    }
-  }
+
+  const newTripTotal = await resolveAuthoritativeFlightTripTotal({
+    duffelOrderId: row.flightBooking.duffel_order_id,
+    changeRaw: change.raw,
+    confirmedOfferId: offerId,
+  });
   if (!newTripTotal) return;
 
   const current = row.total_amount?.toString();
   if (current === newTripTotal.amount) return;
 
-  const orderRaw = row.flightBooking.order_raw;
-  await prisma.flightBooking.update({
-    where: { id: row.flightBooking.id },
-    data: {
-      order_raw: patchDuffelOrderRawTotal(
-        orderRaw,
-        newTripTotal.amount,
-        newTripTotal.currency,
-      ) as unknown as Prisma.InputJsonValue,
-      last_offer_total_amount: new Prisma.Decimal(newTripTotal.amount),
-      last_offer_total_currency: newTripTotal.currency,
-    },
+  await syncBookingOrderFromDuffel({
+    flightBookingId: row.flightBooking.id,
+    bookingId,
+    duffelOrderId: row.flightBooking.duffel_order_id,
+    bookingTotalOverride: newTripTotal,
   });
-  await prisma.booking.update({
-    where: { id: bookingId },
-    data: {
-      total_amount: new Prisma.Decimal(newTripTotal.amount),
-      currency: newTripTotal.currency,
+}
+
+/** One-time repair: sync totals from Duffel for confirmed flights with a confirmed order change. */
+export async function repairInflatedFlightBookingTotals(): Promise<{
+  scanned: number;
+  updated: number;
+}> {
+  const rows = await prisma.booking.findMany({
+    where: {
+      type: "flight",
+      status: "confirmed",
+      flightBooking: {
+        is: { duffel_order_id: { not: null } },
+      },
     },
+    select: { id: true, total_amount: true },
   });
+
+  let updated = 0;
+  for (const row of rows) {
+    const change = await prisma.flightOrderChange.findFirst({
+      where: {
+        status: "confirmed",
+        flightBooking: { booking_id: row.id },
+      },
+      select: { id: true },
+    });
+    if (!change) continue;
+
+    const before = row.total_amount?.toString();
+    await reconcileFlightBookingTotalFromConfirmedChange(row.id);
+    const afterRow = await bookingRepository.findById(row.id);
+    const after = afterRow?.total_amount?.toString();
+    if (before !== after) updated += 1;
+  }
+
+  return { scanned: rows.length, updated };
 }
 
 export async function listOrderChangesForBooking(input: {

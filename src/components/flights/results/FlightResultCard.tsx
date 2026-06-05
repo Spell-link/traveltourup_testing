@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import type { FlightListDisplay } from "@/lib/flights/list-display";
 import { ComparisonCheckbox } from "@/components/shared/GenericComparison";
-import { WishlistToggle } from "@/components/wishlist/WishlistToggle";
 import { useTranslations, useLocale } from "next-intl";
 import { useCurrency } from "@/components/providers/CurrencyProvider";
 
@@ -103,7 +102,7 @@ export const FlightResultCard = memo(function FlightResultCard({
         className={`flex flex-col ${isGrid ? "flex-1" : "lg:flex-row lg:items-center"} justify-between ${isGrid ? "gap-3" : ""}`}
       >
         <div className="flex-1 min-w-0">
-          {/* div+role=button: must not wrap real <button>s (e.g. WishlistToggle) — invalid HTML & hydration errors */}
+          {/* div+role=button: must not wrap real <button>s — invalid HTML & hydration errors */}
           <div
             role="button"
             tabIndex={0}
@@ -154,16 +153,6 @@ export const FlightResultCard = memo(function FlightResultCard({
                       />
                     ) : null}
                   </div>
-                  <div className="flex justify-center">
-                    <WishlistToggle
-                      display="icon"
-                      type="flight"
-                      refId={flight.id}
-                      title={`${flight.departureAirport} → ${flight.arrivalAirport}`}
-                      subtitle={`${flight.airlineName ?? flight.airline} · ${flight.flightNumber}`}
-                      imageUrl={flight.airlineLogoUrl}
-                    />
-                  </div>
                   <div className="flex shrink-0 items-center justify-end">
                     <Star className="mr-1 text-yellow-500" />
                     <span className="font-semibold text-foreground">{flight.rating}</span>
@@ -205,14 +194,6 @@ export const FlightResultCard = memo(function FlightResultCard({
                       onToggle={() => comparison.toggleItem(flight)}
                     />
                   ) : null}
-                  <WishlistToggle
-                    display="icon"
-                    type="flight"
-                    refId={flight.id}
-                    title={`${flight.departureAirport} → ${flight.arrivalAirport}`}
-                    subtitle={`${flight.airlineName ?? flight.airline} · ${flight.flightNumber}`}
-                    imageUrl={flight.airlineLogoUrl}
-                  />
                   <div className="flex shrink-0 items-center">
                     <Star className="mr-1 text-yellow-500" />
                     <span className="font-semibold">{flight.rating}</span>

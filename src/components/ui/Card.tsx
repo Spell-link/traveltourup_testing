@@ -9,7 +9,6 @@ import { Car, Hotel, CalendarCheck, Headphones } from "lucide-react";
 import { MapPin, User, Luggage, Users, Plane, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import SectionHeading from "../shared/SectionHeading";
-import { WishlistToggle } from "@/components/wishlist/WishlistToggle";
 import { shouldUnoptimizeStaysSupplierImage } from "@/lib/images/stays-supplier-image";
 
 // ─── Data Types (exported for parent components) ─────────────────────────────
@@ -196,18 +195,6 @@ function HotelCard({
             className={IMAGE_HOVER}
             unoptimized={shouldUnoptimizeStaysSupplierImage(getImageSrc(data.image!))}
           />
-          {data.id != null && (
-            <div className="absolute right-2 top-2 z-20" onClick={(e) => e.stopPropagation()}>
-              <WishlistToggle
-                display="icon"
-                type="hotel"
-                refId={String(data.id)}
-                title={name}
-                subtitle={location}
-                imageUrl={getImageSrc(data.image!)}
-              />
-            </div>
-          )}
           <div className="absolute bottom-4 left-4 z-10 bg-card/90 backdrop-blur-sm px-3 py-1 rounded-full shadow-sm flex items-center border border-border">
             <span className="text-yellow-500 mr-1" aria-hidden>★</span>
             <span className="font-bold text-foreground">{rating}</span>
@@ -216,18 +203,6 @@ function HotelCard({
         </div>
       ) : (
         <div className="relative h-56 bg-muted flex items-center justify-center rounded-t-xl">
-          {data.id != null && (
-            <div className="absolute right-2 top-2 z-20" onClick={(e) => e.stopPropagation()}>
-              <WishlistToggle
-                display="icon"
-                type="hotel"
-                refId={String(data.id)}
-                title={name}
-                subtitle={location}
-                imageUrl={null}
-              />
-            </div>
-          )}
           <span className="text-muted-foreground">No Image</span>
         </div>
       )}
@@ -311,18 +286,6 @@ function CarCard({
             sizes={IMAGE_SIZES_DEFAULT}
             className={IMAGE_HOVER}
           />
-          {data.id != null && (
-            <div className="absolute right-2 top-2 z-20" onClick={(e) => e.stopPropagation()}>
-              <WishlistToggle
-                display="icon"
-                type="car"
-                refId={String(data.id)}
-                title={name}
-                subtitle={type}
-                imageUrl={getImageSrc(data.image!)}
-              />
-            </div>
-          )}
           <div className="absolute top-4 left-4 z-10 bg-primary text-primary-foreground px-3 py-1 rounded-full text-sm font-bold">
             {type}
           </div>
@@ -332,18 +295,6 @@ function CarCard({
           <div className="w-full h-full bg-gradient-to-br from-muted to-border flex items-center justify-center">
             <span className="text-muted-foreground font-bold text-lg">{type}</span>
           </div>
-          {data.id != null && (
-            <div className="absolute right-2 top-2 z-20" onClick={(e) => e.stopPropagation()}>
-              <WishlistToggle
-                display="icon"
-                type="car"
-                refId={String(data.id)}
-                title={name}
-                subtitle={type}
-                imageUrl={null}
-              />
-            </div>
-          )}
           <div className="absolute top-4 left-4 z-10 bg-primary text-primary-foreground px-3 py-1 rounded-full text-sm font-bold">
             {type}
           </div>
@@ -487,18 +438,6 @@ function FlightCard({
             <h4 className="font-bold text-foreground transition-colors hover:text-primary">{airline}</h4>
           </Link>
 
-          </div>
-          <div>
-          {data.id != null && (
-            <WishlistToggle
-              display="icon"
-              type="flight"
-              refId={String(data.id)}
-              title={`${departureCity} → ${arrivalCity}`}
-              subtitle={airline}
-              imageUrl={logoSrc || null}
-            />
-          )}
           </div>
         </div>
    

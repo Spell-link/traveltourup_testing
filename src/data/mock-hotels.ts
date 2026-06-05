@@ -13,6 +13,8 @@ export interface HotelRoom {
   totalStayCurrency?: string;
   stayNights?: number;
   cancellationTimeline?: StaysCancellationStep[];
+  boardType?: string | null;
+  paymentType?: string | null;
   negotiatedRateId?: string | null;
   supportedLoyaltyProgramme?: string | null;
   rateConditions?: StaysRateCondition[];

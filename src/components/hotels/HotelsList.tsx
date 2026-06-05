@@ -1,6 +1,7 @@
 // @ts-nocheck - Phase 1: Complex component; full typing in Phase 3
 "use client";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import dynamic from "next/dynamic";
 import Image from "next/image";
@@ -46,7 +47,6 @@ import { createHotelComparisonConfig } from "../shared/ComparisonConfigs";
 import DualSlider from "@/components/ui/DualSlider";
 import { useCurrency } from "@/components/providers/CurrencyProvider";
 import HotelMapModal from "./HotelMapModal";
-import { WishlistToggle } from "@/components/wishlist/WishlistToggle";
 import { HotelSearchResultSkeleton } from "@/components/hotels/HotelSearchResultSkeleton";
 import {
   TTU_STAYS_SEARCH_SESSION_KEY,
@@ -54,6 +54,8 @@ import {
   TTU_STAYS_SEARCH_STARTED_EVENT,
   TTU_STAYS_SEARCH_UPDATED_EVENT,
 } from "@/lib/http/stays.client";
+import { staysSearchFromUrl } from "@/lib/hotels/search-from-url";
+import { runStaysSearchFromUrlResult } from "@/lib/hotels/run-stays-search-from-url.client";
 import {
   HOTEL_RESULTS_PAGE_SIZE,
   getHotelResultsPaginationRange,
@@ -149,6 +151,9 @@ const HotelBook = () => {
   const hr = useTranslations("Hotels.results");
   const tc = useTranslations("Common");
   const locale = useLocale();
+  const searchParams = useSearchParams();
+  const staysUrlSearchKey = searchParams.toString();
+  const lastProcessedStaysUrlKeyRef = useRef("");
   const { formatFromUsd } = useCurrency();
   const [hotels, setHotels] = useState([]);
   const [filteredHotels, setFilteredHotels] = useState([]);
@@ -288,6 +293,23 @@ const HotelBook = () => {
     };
   }, []);
 
+  /** Run search from URL (WordPress handoff, deep links, in-app search). */
+  useEffect(() => {
+    if (lastProcessedStaysUrlKeyRef.current === staysUrlSearchKey) return;
+    const parsed = staysSearchFromUrl(new URLSearchParams(staysUrlSearchKey));
+    if (!parsed) return;
+
+    lastProcessedStaysUrlKeyRef.current = staysUrlSearchKey;
+    setLoading(true);
+    setFromStaysSearch(true);
+    setHotels([]);
+    runStaysSearchFromUrlResult(parsed).catch(() => {
+      lastProcessedStaysUrlKeyRef.current = "";
+      setLoading(false);
+      setFromStaysSearch(false);
+    });
+  }, [staysUrlSearchKey]);
+
   // Apply filters
   useEffect(() => {
     let result = [...hotels];
@@ -381,6 +403,17 @@ const HotelBook = () => {
     return filteredHotels.slice(start, start + HOTEL_RESULTS_PAGE_SIZE);
   }, [filteredHotels, displayPage]);
 
+  const mapLocations = useMemo(
+    () =>
+      filteredHotels.map((h: { id?: string | number; name: string; lat: number; lng: number }) => ({
+        id: h.id,
+        name: h.name,
+        lat: h.lat,
+        lng: h.lng,
+      })),
+    [filteredHotels],
+  );
+
   useEffect(() => {
     if (totalPages === 0) return;
     setCurrentPage((p) => Math.min(p, totalPages));
@@ -446,7 +479,7 @@ const HotelBook = () => {
     const isExpanded = expandedHotel === hotel.id;
     const isGrid = variant === 'grid';
     const isSelectedForComparison = comparison.isSelected(hotel.id);
-
+    console.log("hotel",hotel);
     if (isGrid) {
       return (
         <div className="bg-card rounded-xl shadow-md border border-border hover:shadow-lg transition-shadow duration-300 h-full flex flex-col">
@@ -482,29 +515,21 @@ const HotelBook = () => {
                 {renderStars(hotel.stars)}
               </div>
               <div className="flex items-center gap-2">
-                <WishlistToggle
-                  display="icon"
-                  type="hotel"
-                  refId={String(hotel.id)}
-                  title={hotel.name}
-                  subtitle={hotel.area || hotel.address}
-                  imageUrl={hotel.images?.[0] ?? null}
-                />
                 <ComparisonCheckbox
                   isSelected={isSelectedForComparison}
                   onToggle={() => comparison.toggleItem(hotel)}
                 />
               </div>
             </div>
-            <p className="text-muted-foreground text-xs line-clamp-2 mb-3 flex-1">{hotel.description}</p>
-            <div className="flex flex-wrap gap-1 mb-3">
+            <p className="text-muted-foreground text-xs line-clamp-2 mb-2 flex-1">{hotel.description}</p>
+            <div className="flex flex-wrap gap-1 mb-2">
               {hotel.deals.slice(0, 2).map((deal, index) => (
                 <span key={index} className={`px-2 py-0.5 rounded text-xs ${deal.highlight ? 'bg-success/20 text-success' : 'bg-primary/10 text-primary'}`}>
                   {deal.text}
                 </span>
               ))}
             </div>
-            <div className="mt-auto border-t border-border pt-3">
+            <div className="mt-auto border-t border-border pt-2">
               <div className="mb-2 flex items-end justify-between">
                 <div>
                   {hotel.discount > 0 && !hotel.staysPricingPending && (
@@ -540,11 +565,11 @@ const HotelBook = () => {
 
     return (
       <div className="bg-card rounded-xl shadow-md border border-border hover:shadow-lg transition-shadow duration-300 mb-4">
-        <div className="p-6">
+        <div className="p-4">
           <div className="flex flex-col lg:flex-row">
             {/* Hotel Image */}
             <div className="mb-4 lg:mb-0 lg:w-1/4 lg:pr-6">
-              <div className="relative h-48 overflow-hidden rounded-lg bg-muted lg:h-40">
+              <div className="relative h-48 overflow-hidden rounded-lg bg-muted ">
                 {hotel.images?.[0] ? (
                   <Image
                     src={hotel.images[0]}
@@ -571,21 +596,7 @@ const HotelBook = () => {
                 )}
               </div>
 
-              {/* Rating Badge */}
-              <div className="mt-3 flex items-center justify-between">
-                <div className="flex items-center">
-                  <div className="flex items-center rounded-lg bg-primary/20 px-2 py-1 text-primary">
-                    <Star className="mr-1" />
-                    <span className="font-bold">{hotel.rating}</span>
-                  </div>
-                  <span className="ml-2 text-sm text-muted-foreground">
-                    {hotel.fromDuffelStays && hotel.reviews === 0 ? "· guest score" : `(${hotel.reviews})`}
-                  </span>
-                </div>
-                <div className="text-muted-foreground text-sm">
-                  {renderStars(hotel.stars)}
-                </div>
-              </div>
+
             </div>
 
             {/* Hotel Details */}
@@ -594,14 +605,6 @@ const HotelBook = () => {
                 <div className="flex justify-between items-start">
                   <h3 className="font-bold text-lg hover:text-primary cursor-pointer flex-1"><Link href={`/hotels/${encodeURIComponent(String(hotel.id))}`}>{hotel.name}</Link></h3>
                   <div className="flex items-center gap-2">
-                    <WishlistToggle
-                      display="icon"
-                      type="hotel"
-                      refId={String(hotel.id)}
-                      title={hotel.name}
-                      subtitle={hotel.area || hotel.address}
-                      imageUrl={hotel.images?.[0] ?? null}
-                    />
                     <ComparisonCheckbox
                       isSelected={isSelectedForComparison}
                       onToggle={() => comparison.toggleItem(hotel)}
@@ -626,10 +629,10 @@ const HotelBook = () => {
                 </div>
               </div>
 
-              <p className="text-foreground text-sm mb-4 line-clamp-2">{hotel.description}</p>
+              <p className="text-foreground text-sm  line-clamp-2">{hotel.description}</p>
 
               {/* Tags */}
-              <div className="flex flex-wrap gap-2 mb-4">
+              <div className="flex flex-wrap gap-2 mb-2">
                 {hotel.tags.map((tag, index) => (
                   <span key={index} className="bg-muted text-foreground px-2 py-1 rounded text-xs">
                     {tag}
@@ -638,7 +641,7 @@ const HotelBook = () => {
               </div>
 
               {/* Top Amenities */}
-              <div className="mb-4">
+              <div className="mb-2">
                 <h4 className="font-semibold text-sm mb-2">Top amenities:</h4>
                 <div className="flex flex-wrap gap-2">
                   {hotel.amenities.slice(0, 4).map((amenityId, index) => {
@@ -670,8 +673,8 @@ const HotelBook = () => {
 
               {/* Expanded Details */}
               {isExpanded && (
-                <div className="mt-4 pt-4 border-t border-border">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div className="pt-2 border-t border-border">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-2">
                     <div className="text-center">
                       <div className="text-lg font-bold text-foreground">{hotel.guestRating}</div>
                       <div className="text-xs text-muted-foreground">Guest rating</div>
@@ -690,11 +693,13 @@ const HotelBook = () => {
                     </div>
                   </div>
 
-                  <div className="text-sm flex items-center justify-center gap-4">
-                    <div className="flex items-center text-success mb-1">
-                      <Check className="mr-2" />
-                      <span>{hotel.mealPlan}</span>
-                    </div>
+                  <div className="text-sm flex items-center justify-center gap-2">
+                    {hotel.mealPlan && (
+                      <div className="flex items-center text-success mb-1">
+                        <Check className="mr-2" />
+                        <span>{hotel.mealPlan}</span>
+                      </div>
+                    )}
                     {hotel.freeCancellation && (
                       <div className="flex items-center text-success mb-1">
                         <Check className="mr-2" />
@@ -713,7 +718,7 @@ const HotelBook = () => {
             </div>
 
             {/* Price and Select Button */}
-            <div className="mt-4 lg:mt-0 lg:w-1/4 lg:border-l lg:pl-6">
+            <div className="mt-4 lg:mt-0 lg:w-1/4 lg:border-l border-border lg:pl-4">
               <div className="mb-4 text-right">
                 <div className="mb-1 flex flex-col items-start justify-center">
                   {hotel.staysPricingPending ? (
@@ -744,7 +749,21 @@ const HotelBook = () => {
                     <div className="mt-1 text-sm text-muted-foreground">{hotel.mealPlan}</div>
                   )}
                 </div>
-
+                {/* Rating Badge */}
+                <div className="my-3 flex items-center justify-between">
+                  <div className="flex items-center">
+                    <div className="flex items-center rounded-lg bg-primary/20 px-2 py-1 text-primary">
+                      <Star className="mr-1" />
+                      <span className="font-bold">{hotel.rating}</span>
+                    </div>
+                    <span className="ml-2 text-sm text-muted-foreground">
+                      {hotel.fromDuffelStays && hotel.reviews === 0 ? "· guest score" : `(${hotel.reviews})`}
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground text-sm">
+                    {renderStars(hotel.stars)}
+                  </div>
+                </div>
                 <Link href={`/hotels/${encodeURIComponent(String(hotel.id))}`}>
                   <button className="mb-2 w-full rounded-lg bg-primary px-4 py-3 font-semibold text-primary-foreground transition-colors duration-300 hover:bg-primary-600">
                     {tc("select")}
@@ -1001,7 +1020,7 @@ const HotelBook = () => {
             aria-hidden
           />
         ) : (
-          <LeafletMap locations={filteredHotels} height="280px" zoom={12} />
+          <LeafletMap locations={mapLocations} height="280px" zoom={12} />
         )}
       </div>
     </div>
@@ -1300,8 +1319,8 @@ const HotelBook = () => {
                             type="button"
                             onClick={() => setCurrentPage(item)}
                             className={`inline-flex h-10 min-w-[2.5rem] items-center justify-center rounded-lg border px-3 text-sm ${displayPage === item
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-input bg-card hover:bg-muted"
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-input bg-card hover:bg-muted"
                               }`}
                           >
                             {item}
@@ -1337,7 +1356,7 @@ const HotelBook = () => {
           onCloseModal={comparison.closeModal}
         />
 
-        <Dialog  open={hotelEditSearchOpen} onOpenChange={setHotelEditSearchOpen}>
+        <Dialog open={hotelEditSearchOpen} onOpenChange={setHotelEditSearchOpen}>
           <DialogContent
             className={cn(
               "flex max-h-[min(92vh,880px)] w-[calc(100vw-1rem)] max-w-none flex-col gap-0  rounded-2xl bg-background p-0 shadow-2xl sm:max-w-2xl lg:max-w-4xl",
@@ -1357,14 +1376,14 @@ const HotelBook = () => {
                 }}
               />
             </div>
-     
+
           </DialogContent>
         </Dialog>
 
         <HotelMapModal
           open={showMapModal}
           onClose={() => setShowMapModal(false)}
-          locations={filteredHotels}
+          locations={mapLocations}
         />
       </div>
     </div>

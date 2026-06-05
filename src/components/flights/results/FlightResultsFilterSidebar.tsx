@@ -95,6 +95,7 @@ export function FlightResultsFilterSidebar({
   const stopsSummary = STOPS_MODE_ORDER.includes(stopsMode)
     ? tStops(stopsMode)
     : tStops("label");
+
   return (
     <div className="bg-card lg:mb-0 lg:rounded-xl lg:p-6 lg:shadow-lg">
       {editSearchSummary && onEditSearch ? (

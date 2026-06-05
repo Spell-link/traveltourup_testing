@@ -33,7 +33,6 @@ import {
 } from "lucide-react";
 import type { CarListing } from "@/types";
 import { MOCK_CARS } from "@/data/mock-cars";
-import { WishlistToggle } from "@/components/wishlist/WishlistToggle";
 import { Input } from "@/components/ui/Input";
 import {
   useComparison,
@@ -358,14 +357,6 @@ const CarBook = () => {
                   isSelected={isSelectedForComparison}
                   onToggle={() => comparison.toggleItem(car)}
                 />
-                <WishlistToggle
-                  display="icon"
-                  type="car"
-                  refId={String(car.id)}
-                  title={car.name}
-                  subtitle={`${car.category} · ${car.supplier}`}
-                  imageUrl={car.images?.[0] ?? null}
-                />
               </div>
               <div className="flex items-center bg-primary/20 text-primary px-2 py-1 rounded-lg">
                 <Star className="mr-1" />
@@ -431,14 +422,6 @@ const CarBook = () => {
                   <ComparisonCheckbox
                     isSelected={isSelectedForComparison}
                     onToggle={() => comparison.toggleItem(car)}
-                  />
-                  <WishlistToggle
-                    display="icon"
-                    type="car"
-                    refId={String(car.id)}
-                    title={car.name}
-                    subtitle={`${car.category} · ${car.location}`}
-                    imageUrl={car.images?.[0] ?? null}
                   />
                   <button
                     onClick={() => setExpandedCar(isExpanded ? null : car.id)}

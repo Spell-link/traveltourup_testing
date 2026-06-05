@@ -38,3 +38,10 @@ export function staysCreateBooking(data: object) {
 export function staysGetBooking(bookingId: string) {
   return duffelFetch<unknown>(`/stays/bookings/${encodeURIComponent(bookingId)}`);
 }
+
+export function staysCancelBooking(bookingId: string) {
+  return duffelFetch<unknown>(
+    `/stays/bookings/${encodeURIComponent(bookingId)}/actions/cancel`,
+    { method: "POST", body: JSON.stringify({ data: {} }) },
+  );
+}

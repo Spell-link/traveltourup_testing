@@ -1,0 +1,1652 @@
+
+<style>
+  /* ═══ TravelTourUp Search Widget - WordPress Embeddable ═══ */
+  :root {
+    --ttu-primary: #0e90c7;
+    --ttu-primary-600: #0b73a0;
+    --ttu-primary-10: rgba(14, 144, 199, 0.1);
+    --ttu-foreground: #0f172a;
+    --ttu-muted: #f1f5f9;
+    --ttu-muted-fg: #475569;
+    --ttu-border: #e2e8f0;
+    --ttu-input: #e2e8f0;
+    --ttu-card: #ffffff;
+    --ttu-font: 'Lato', -apple-system, BlinkMacSystemFont, sans-serif;
+    --ttu-heading: 'Bai Jamjuree', sans-serif;
+  }
+
+  .ttu-widget {
+    font-family: var(--ttu-font);
+    max-width: 1280px;
+    margin: 0 auto;
+    background: var(--ttu-card);
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(226, 232, 240, 0.5);
+  }
+
+  /* Tabs - match original: grid on mobile, flex on desktop */
+  .ttu-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-bottom: 1px solid var(--ttu-border);
+  }
+
+  @media (min-width: 768px) {
+    .ttu-tabs {
+      display: flex;
+      flex-direction: row;
+    }
+  }
+
+  .ttu-tab {
+    /* flex: 1; */
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    padding: 10px 10px !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    font-family: var(--ttu-heading) !important;
+    background: transparent !important;
+    border: none !important;
+    border-bottom: 2px solid transparent !important;
+    color: var(--ttu-muted-fg) !important;
+    cursor: pointer !important;
+    transition: all 0.2s !important;
+  }
+
+  @media (min-width: 640px) {
+    .ttu-tab {
+      gap: 8px !important;
+      padding: 16px 24px !important;
+      font-size: 14px !important;
+    }
+  }
+
+  .ttu-tab:hover {
+    color: var(--ttu-primary) !important;
+    background: var(--ttu-muted) !important;
+  }
+
+  .ttu-tab.active {
+    color: var(--ttu-primary) !important;
+    background: var(--ttu-primary-10) !important;
+    border-bottom-color: var(--ttu-primary) !important;
+    border-radius: 8px 8px 0 0 !important;
+    margin-bottom: -1px !important;
+  }
+
+  .ttu-tab svg {
+    flex-shrink: 0;
+  }
+
+  .ttu-tab.active svg {
+    color: var(--ttu-primary) !important;
+  }
+
+  .ttu-tab:not(.active) svg {
+    color: var(--ttu-muted-fg) !important;
+  }
+
+  .ttu-content {
+    padding: 16px !important;
+  }
+
+  @media (min-width: 640px) {
+    .ttu-content {
+      padding: 24px;
+    }
+  }
+
+  .ttu-panel {
+    display: none;
+  }
+
+  .ttu-panel.active {
+    display: block;
+  }
+
+  /* Row: Trip type + Cabin - match original spacing */
+  .ttu-row-top {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  @media (max-width: 768px) {
+    .ttu-row-top {
+      flex-direction: column;
+    }
+
+    .ttu-select-wrap {
+      width: 100%;
+    }
+  }
+
+  .ttu-trip-type {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .ttu-row-top .ttu-select-wrap {
+    flex-shrink: 0;
+  }
+
+  .ttu-radio-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .ttu-radio-wrap input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--ttu-primary);
+    cursor: pointer;
+  }
+
+  .ttu-radio-wrap span {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ttu-muted-fg);
+  }
+
+  .ttu-select-wrap {
+    position: relative;
+  }
+
+  .ttu-select-wrap select {
+    width: 100%;
+    min-width: 192px;
+    padding: 12px 40px 12px 16px;
+    border: 1px solid var(--ttu-input);
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ttu-foreground);
+    background: var(--ttu-card);
+    appearance: none;
+    cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  }
+
+  .ttu-select-wrap .ttu-chevron {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--ttu-muted-fg);
+  }
+
+  /* Form grid - 12 columns to match original */
+  .ttu-form-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .ttu-form-grid .ttu-location-group {
+    grid-column: span 5;
+  }
+
+  .ttu-form-grid .ttu-field#depart-field {
+    grid-column: span 2;
+  }
+
+  .ttu-form-grid .ttu-field#return-field {
+    grid-column: span 2;
+  }
+
+  .ttu-form-grid .ttu-field.ttu-travelers-col {
+    grid-column: span 4;
+  }
+
+  .ttu-form-grid .ttu-field.ttu-search-col {
+    grid-column: span 1;
+  }
+
+  /* Round trip: travelers gets 2 cols */
+  .ttu-form-grid.round-trip .ttu-field.ttu-travelers-col {
+    grid-column: span 2;
+  }
+
+  @media (max-width: 1024px) {
+    .ttu-form-grid .ttu-location-group {
+      grid-column: span 12;
+    }
+
+    .ttu-form-grid .ttu-field#depart-field,
+    .ttu-form-grid .ttu-field#return-field {
+      grid-column: span 6;
+    }
+
+    .ttu-form-grid .ttu-field.ttu-travelers-col {
+      grid-column: span 6;
+    }
+
+    .ttu-form-grid .ttu-field.ttu-search-col {
+      grid-column: span 12;
+    }
+  }
+
+  @media (max-width: 768px) {
+
+    .ttu-form-grid .ttu-field#depart-field,
+    .ttu-form-grid .ttu-field#return-field,
+    .ttu-form-grid .ttu-field.ttu-travelers-col {
+      grid-column: span 12;
+    }
+  }
+
+  /* Field */
+  .ttu-field {
+    position: relative;
+    min-width: 0;
+  }
+
+  .ttu-field label {
+    position: absolute;
+    left: 16px;
+    top: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--ttu-muted-fg);
+    pointer-events: none;
+  }
+
+  .ttu-input-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 12px 16px;
+    padding-top: 28px;
+    min-height: 64px;
+    height: 64px;
+    border: 1px solid var(--ttu-input);
+    border-radius: 8px;
+    background: var(--ttu-card);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+  }
+
+  .ttu-input-wrap:hover {
+    border-color: var(--ttu-primary);
+  }
+
+  .ttu-input-wrap .ttu-placeholder {
+    color: var(--ttu-muted-fg);
+  }
+
+  .ttu-input-wrap .ttu-value {
+    color: var(--ttu-foreground);
+  }
+
+  .ttu-input-wrap input[type="text"] {
+    flex: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ttu-foreground);
+    min-width: 0;
+  }
+
+  .ttu-input-wrap input::placeholder {
+    color: var(--ttu-muted-fg);
+  }
+
+  .ttu-input-search {
+    cursor: default;
+  }
+
+  .ttu-input-search input {
+    cursor: text;
+  }
+
+  .dropdown-scrollbar {
+    overflow-y: auto;
+    max-height: 320px;
+  }
+
+  /* Swap button - positioned by parent .ttu-location-group */
+  .ttu-swap-btn {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    border: 1px solid var(--ttu-input) !important;
+    background: var(--ttu-card) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    transition: all 0.2s !important;
+    flex-shrink: 0 !important;
+    padding: 0 !important;
+    color: black !important;
+  }
+
+  .ttu-swap-btn:hover:not(:disabled) {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12) !important;
+    background: var(--ttu-muted) !important;
+  }
+
+  .ttu-swap-btn:disabled {
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+  }
+
+  /* Dropdown */
+  .ttu-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    border: 1px solid var(--ttu-input);
+    border-radius: 8px;
+    background: var(--ttu-card);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+    z-index: 500;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  .ttu-dropdown-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--ttu-border);
+    transition: background 0.15s;
+  }
+
+  .ttu-dropdown-item:last-child {
+    border-bottom: none;
+  }
+
+  .ttu-dropdown-item:hover {
+    background: var(--ttu-primary-10);
+  }
+
+  .ttu-dropdown-item .ttu-item-title {
+    font-weight: 600;
+    color: var(--ttu-foreground);
+  }
+
+  .ttu-dropdown-item .ttu-item-sub {
+    font-size: 12px;
+    color: var(--ttu-muted-fg);
+  }
+
+  .ttu-dropdown-item .ttu-item-code {
+    font-size: 12px;
+    font-family: monospace;
+    color: var(--ttu-muted-fg);
+    background: var(--ttu-muted);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  /* Search button - matches input height (protected from Elementor/theme overrides) */
+  #ttu-widget .ttu-search-btn {
+    all: revert;
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 56px !important;
+    min-height: 64px !important;
+    height: 100% !important;
+    background: var(--ttu-primary) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    transition: background 0.2s !important;
+    font-weight: 600 !important;
+    font-family: var(--ttu-font) !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    outline: none !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+  }
+
+  #ttu-widget .ttu-search-btn:hover {
+    background: var(--ttu-primary-600) !important;
+  }
+
+  /* Hotels/Cars layout - flex */
+  .ttu-form-flex {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+  }
+
+  .ttu-form-flex .ttu-field {
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .ttu-form-flex .ttu-search-wrap {
+    flex-shrink: 0;
+    width: 56px;
+  }
+
+  @media (max-width: 768px) {
+    .ttu-form-flex .ttu-field {
+      min-width: 100%;
+    }
+
+    .ttu-form-flex .ttu-search-wrap {
+      width: 100%;
+    }
+  }
+
+  /* Calendar */
+  .ttu-calendar {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    padding: 16px;
+    border: 1px solid var(--ttu-input);
+    border-radius: 8px;
+    background: var(--ttu-card);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+    z-index: 500;
+    min-width: 320px;
+  }
+
+  .ttu-calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .ttu-calendar-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ttu-foreground);
+    margin: 0;
+  }
+
+  .ttu-calendar-nav {
+    padding: 8px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 50%;
+    display: flex;
+    transition: background 0.2s;
+  }
+
+  .ttu-calendar-nav:hover {
+    background: var(--ttu-muted);
+  }
+
+  .ttu-calendar-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .ttu-calendar-day-label {
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ttu-muted-fg);
+  }
+
+  .ttu-calendar-day {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+    background: transparent;
+    color: var(--ttu-foreground);
+    font-family: var(--ttu-font);
+  }
+
+  .ttu-calendar-day:hover {
+    background: var(--ttu-muted);
+    color: var(--ttu-foreground);
+  }
+
+  .ttu-calendar-day.today {
+    background: rgba(14, 144, 199, 0.2);
+    color: var(--ttu-primary);
+  }
+
+  .ttu-calendar-day.selected {
+    background: var(--ttu-primary);
+    color: white;
+  }
+
+  .ttu-calendar-day.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Traveler dropdown */
+  .ttu-traveler-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    padding: 16px;
+    border: 1px solid var(--ttu-input);
+    border-radius: 8px;
+    background: var(--ttu-card);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+    z-index: 500;
+    min-width: 250px;
+  }
+
+  .ttu-traveler-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .ttu-traveler-row:last-child {
+    margin-bottom: 0;
+  }
+
+  .ttu-traveler-row span {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ttu-muted-fg);
+  }
+
+  .ttu-traveler-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .ttu-traveler-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--ttu-input);
+    background: var(--ttu-card);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: var(--ttu-primary) !important;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .ttu-traveler-btn:hover:not(:disabled) {
+    background: var(--ttu-primary-10);
+  }
+
+  .ttu-traveler-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .ttu-traveler-count {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ttu-muted-fg);
+    min-width: 24px;
+    text-align: center;
+  }
+
+  /* More tab */
+  .ttu-more-panel {
+    text-align: center;
+    padding: 16px;
+    color: var(--ttu-muted-fg);
+  }
+
+  .ttu-more-panel a {
+    color: var(--ttu-primary);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .ttu-more-panel a:hover {
+    text-decoration: underline;
+  }
+
+  /* Location container - flex like original, swap centered between inputs */
+  .ttu-location-group {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  @media (min-width: 769px) {
+    .ttu-location-group {
+      flex-direction: row;
+      gap: 8px;
+    }
+
+    .ttu-location-group .ttu-field {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+
+  .ttu-location-group .ttu-swap-btn {
+    position: absolute !important;
+    left: 50% !important;
+    top: 50% !important;
+    transform: translate(-50%, -50%);
+    z-index: 10 !important;
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50%;
+    border: 1px solid var(--ttu-input) !important;
+    background: var(--ttu-card) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    transition: all 0.2s !important;
+  }
+
+  @media (max-width: 768px) {
+    .ttu-location-group .ttu-swap-btn {
+      left: 50% !important;
+      top: calc(50% + 4px) !important;
+    }
+
+    .ttu-swap-btn svg {
+      rotate: 90deg !important;
+    }
+  }
+
+  /* Override Elementor's .elementor-element svg { fill: currentColor } - keep stroke-based icons as intended */
+  #ttu-widget svg {
+    fill: none !important;
+    stroke: black !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+  }
+
+  /* Search button icon - must stay white on blue background */
+  #ttu-widget .ttu-search-btn svg {
+    stroke: white !important;
+    fill: none !important;
+  }
+
+  /* Dropdown scrollbar – hidden by default, reveals on hover with themed styling */
+.dropdown-scrollbar {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent transparent;
+}
+.dropdown-scrollbar:hover {
+  scrollbar-color: color-mix(in srgb, var(--ttu-primary) 50%, transparent) transparent;
+}
+.dropdown-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+.dropdown-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dropdown-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 10px;
+  transition: background 0.2s ease;
+}
+.dropdown-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ttu-primary) 40%, transparent);
+}
+.dropdown-scrollbar:hover::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ttu-primary) 65%, transparent);
+}
+
+</style>
+</head>
+
+<body>
+  <div class="ttu-widget" id="ttu-widget">
+    <!-- Tabs -->
+    <div class="ttu-tabs">
+      <button type="button" class="ttu-tab active" data-tab="flights" aria-pressed="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path
+            d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-2.5-.5-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.5c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
+        </svg>
+        FLIGHTS
+      </button>
+      <button type="button" class="ttu-tab" data-tab="cars" aria-pressed="false">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path
+            d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.9 3.4c-.2.5-.1 1 .3 1.3.4.4 1 .4 1.3 0l.6-.9" />
+          <path d="M14 10h.01" />
+          <circle cx="7" cy="17" r="2" />
+          <path d="M5 17H3" />
+          <circle cx="17" cy="17" r="2" />
+          <path d="M15 17H9" />
+        </svg>
+        CARS
+      </button>
+      <button type="button" class="ttu-tab" data-tab="hotels" aria-pressed="false">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
+          <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
+          <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
+          <path d="M10 6v6" />
+          <path d="M14 6v6" />
+        </svg>
+        HOTELS
+      </button>
+      <button type="button" class="ttu-tab" data-tab="more" aria-pressed="false">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <rect width="7" height="7" x="3" y="3" rx="1" />
+          <rect width="7" height="7" x="14" y="3" rx="1" />
+          <rect width="7" height="7" x="14" y="14" rx="1" />
+          <rect width="7" height="7" x="3" y="14" rx="1" />
+        </svg>
+        MORE
+      </button>
+    </div>
+
+    <!-- Flights Panel -->
+    <div class="ttu-content">
+      <div class="ttu-panel active" id="panel-flights">
+        <div class="ttu-row-top">
+          <div class="ttu-trip-type">
+            <label class="ttu-radio-wrap"><input type="radio" name="trip-type" value="one-way" checked> <span>One
+                Way</span></label>
+            <label class="ttu-radio-wrap"><input type="radio" name="trip-type" value="round-trip"> <span>Round
+                Trip</span></label>
+            <label class="ttu-radio-wrap"><input type="radio" name="trip-type" value="multi-city"> <span>Multi
+                City</span></label>
+          </div>
+          <div class="ttu-select-wrap">
+            <select id="cabin-class">
+              <option value="economy">Economy</option>
+              <option value="premium-economy">Premium Economy</option>
+              <option value="business">Business</option>
+              <option value="first-class">First Class</option>
+            </select>
+            <svg class="ttu-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
+        </div>
+
+        <div class="ttu-form-grid" id="flights-form">
+          <div class="ttu-location-group">
+            <div class="ttu-field ttu-city-field" id="from-field-wrap">
+              <label>Flying From</label>
+              <div class="ttu-input-wrap ttu-input-display" id="from-trigger">
+                <span class="ttu-placeholder" id="from-display">Select City</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="color:var(--ttu-primary)">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+              <div class="ttu-input-wrap ttu-input-search" id="from-search-wrap" style="display:none">
+                <input type="text" id="from-search-input" placeholder="Search origin..." autocomplete="off">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="color:var(--ttu-primary)">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+              <div class="ttu-dropdown dropdown-scrollbar" id="from-dropdown" style="display:none"></div>
+            </div>
+            <div type="button" class="ttu-swap-btn" id="swap-btn" title="Swap destinations">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="m16 3 4 4-4 4" />
+                <path d="M20 7H4" />
+                <path d="m8 21-4-4 4-4" />
+                <path d="M4 17h16" />
+              </svg>
+            </div>
+            <div class="ttu-field ttu-city-field" id="to-field-wrap">
+              <label>Destination To</label>
+              <div class="ttu-input-wrap ttu-input-display" id="to-trigger">
+                <span class="ttu-placeholder" id="to-display">Select City</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="color:var(--ttu-primary)">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+              <div class="ttu-input-wrap ttu-input-search" id="to-search-wrap" style="display:none">
+                <input type="text" id="to-search-input" placeholder="Search destination..." autocomplete="off">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="color:var(--ttu-primary)">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+              <div class="ttu-dropdown dropdown-scrollbar" id="to-dropdown" style="display:none"></div>
+            </div>
+          </div>
+
+          <div class="ttu-field" id="depart-field">
+            <label>Depart Date</label>
+            <div class="ttu-input-wrap" id="depart-trigger">
+              <span class="ttu-placeholder" id="depart-display">Select Date</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-muted-fg)">
+                <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+                <line x1="16" x2="16" y1="2" y2="6" />
+                <line x1="8" x2="8" y1="2" y2="6" />
+                <line x1="3" x2="21" y1="10" y2="10" />
+              </svg>
+            </div>
+            <div class="ttu-calendar" id="depart-calendar" style="display:none"></div>
+          </div>
+
+          <div class="ttu-field" id="return-field">
+            <label>Return Date</label>
+            <div class="ttu-input-wrap" id="return-trigger">
+              <span class="ttu-placeholder" id="return-display">Select Date</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-muted-fg)">
+                <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+                <line x1="16" x2="16" y1="2" y2="6" />
+                <line x1="8" x2="8" y1="2" y2="6" />
+                <line x1="3" x2="21" y1="10" y2="10" />
+              </svg>
+            </div>
+            <div class="ttu-calendar" id="return-calendar" style="display:none"></div>
+          </div>
+
+          <div class="ttu-field ttu-travelers-col">
+            <label>Travelers</label>
+            <div class="ttu-input-wrap" id="travelers-trigger">
+              <span style="display:flex;align-items:center;gap:8px">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="color:var(--ttu-primary)">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                <span class="ttu-placeholder" id="travelers-display">1 Traveler</span>
+              </span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-primary)" id="travelers-chevron">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+            <div class="ttu-traveler-dropdown" id="travelers-dropdown" style="display:none">
+              <div class="ttu-traveler-row">
+                <span>Adults</span>
+                <div class="ttu-traveler-controls">
+                  <div type="button" class="ttu-traveler-btn" id="adults-minus">−</div>
+                  <span class="ttu-traveler-count" id="adults-count">1</span>
+                  <div type="button" class="ttu-traveler-btn" id="adults-plus">+</div>
+                </div>
+              </div>
+              <div class="ttu-traveler-row">
+                <span>Children</span>
+                <div class="ttu-traveler-controls">
+                  <div type="button" class="ttu-traveler-btn" id="children-minus">−</div>
+                  <span class="ttu-traveler-count" id="children-count">0</span>
+                  <div type="button" class="ttu-traveler-btn" id="children-plus">+</div>
+                </div>
+              </div>
+              <div class="ttu-traveler-row">
+                <span>Infants</span>
+                <div class="ttu-traveler-controls">
+                  <div type="button" class="ttu-traveler-btn" id="infants-minus">−</div>
+                  <span class="ttu-traveler-count" id="infants-count">0</span>
+                  <div type="button" class="ttu-traveler-btn" id="infants-plus">+</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ttu-field ttu-search-col" style="display:flex;align-items:stretch;">
+            <button type="button" class="ttu-search-btn" id="search-flights" aria-label="Search flights">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cars Panel -->
+      <div class="ttu-panel" id="panel-cars">
+        <div class="ttu-form-flex">
+          <div class="ttu-field">
+            <label>From Airport</label>
+            <div class="ttu-input-wrap" id="cars-from-trigger">
+              <span class="ttu-placeholder" id="cars-from-display">Select Location</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-primary)">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+            <div class="ttu-dropdown dropdown-scrollbar" id="cars-from-dropdown" style="display:none"></div>
+          </div>
+          <div class="ttu-field">
+            <label>Date</label>
+            <div class="ttu-input-wrap" id="cars-date-trigger">
+              <span class="ttu-placeholder" id="cars-date-display">Select Date</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-muted-fg)">
+                <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+                <line x1="16" x2="16" y1="2" y2="6" />
+                <line x1="8" x2="8" y1="2" y2="6" />
+                <line x1="3" x2="21" y1="10" y2="10" />
+              </svg>
+            </div>
+            <div class="ttu-calendar" id="cars-date-calendar" style="display:none"></div>
+          </div>
+          <div class="ttu-field">
+            <label>Travelers</label>
+            <div class="ttu-input-wrap" id="cars-travelers-trigger">
+              <span style="display:flex;align-items:center;gap:8px">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="color:var(--ttu-primary)">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                <span class="ttu-placeholder" id="cars-travelers-display">1 Traveler</span>
+              </span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-primary)">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+            <div class="ttu-traveler-dropdown" id="cars-travelers-dropdown" style="display:none">
+              <div class="ttu-traveler-row">
+                <span>Adults</span>
+                <div class="ttu-traveler-controls">
+                  <div type="button" class="ttu-traveler-btn" id="cars-adults-minus">−</div>
+                  <span class="ttu-traveler-count" id="cars-adults-count">1</span>
+                  <div type="button" class="ttu-traveler-btn" id="cars-adults-plus">+</div>
+                </div>
+              </div>
+              <div class="ttu-traveler-row">
+                <span>Children</span>
+                <div class="ttu-traveler-controls">
+                  <div type="button" class="ttu-traveler-btn" id="cars-children-minus">−</div>
+                  <span class="ttu-traveler-count" id="cars-children-count">0</span>
+                  <div type="button" class="ttu-traveler-btn" id="cars-children-plus">+</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ttu-search-wrap">
+            <button type="button" class="ttu-search-btn" id="search-cars" style="width:100%;height:64px"
+              aria-label="Search cars">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hotels Panel -->
+      <div class="ttu-panel" id="panel-hotels">
+        <div class="ttu-form-flex">
+          <div class="ttu-field">
+            <label>Destination</label>
+            <div class="ttu-input-wrap" id="hotels-dest-trigger">
+              <span class="ttu-placeholder" id="hotels-dest-display">Select Destination</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-primary)">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+            <div class="ttu-dropdown dropdown-scrollbar" id="hotels-dest-dropdown" style="display:none"></div>
+          </div>
+          <div class="ttu-field">
+            <label>Check-in Date</label>
+            <div class="ttu-input-wrap" id="checkin-trigger">
+              <span class="ttu-placeholder" id="checkin-display">Select Date</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-muted-fg)">
+                <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+                <line x1="16" x2="16" y1="2" y2="6" />
+                <line x1="8" x2="8" y1="2" y2="6" />
+                <line x1="3" x2="21" y1="10" y2="10" />
+              </svg>
+            </div>
+            <div class="ttu-calendar" id="checkin-calendar" style="display:none"></div>
+          </div>
+          <div class="ttu-field">
+            <label>Check-out Date</label>
+            <div class="ttu-input-wrap" id="checkout-trigger">
+              <span class="ttu-placeholder" id="checkout-display">Select Date</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-muted-fg)">
+                <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+                <line x1="16" x2="16" y1="2" y2="6" />
+                <line x1="8" x2="8" y1="2" y2="6" />
+                <line x1="3" x2="21" y1="10" y2="10" />
+              </svg>
+            </div>
+            <div class="ttu-calendar" id="checkout-calendar" style="display:none"></div>
+          </div>
+          <div class="ttu-field">
+            <label>Rooms & Guests</label>
+            <div class="ttu-input-wrap" id="hotels-rooms-trigger">
+              <span style="display:flex;align-items:center;gap:8px">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="color:var(--ttu-primary)">
+                  <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
+                  <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
+                  <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
+                  <path d="M10 6v6" />
+                  <path d="M14 6v6" />
+                </svg>
+                <span class="ttu-placeholder" id="hotels-rooms-display">1 Room, 2 Travelers</span>
+              </span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="color:var(--ttu-primary)">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+            <div class="ttu-traveler-dropdown" id="hotels-rooms-dropdown" style="display:none">
+              <div class="ttu-traveler-row">
+                <span>Rooms</span>
+                <div class="ttu-traveler-controls">
+                  <div type="button" class="ttu-traveler-btn" id="rooms-minus">−</div>
+                  <span class="ttu-traveler-count" id="rooms-count">1</span>
+                  <div type="button" class="ttu-traveler-btn" id="rooms-plus">+</div>
+                </div>
+              </div>
+              <div class="ttu-traveler-row">
+                <span>Adults</span>
+                <div class="ttu-traveler-controls">
+                  <div type="button" class="ttu-traveler-btn" id="hotels-adults-minus">−</div>
+                  <span class="ttu-traveler-count" id="hotels-adults-count">2</span>
+                  <div type="button" class="ttu-traveler-btn" id="hotels-adults-plus">+</div>
+                </div>
+              </div>
+              <div class="ttu-traveler-row">
+                <span>Children</span>
+                <div class="ttu-traveler-controls">
+                  <div type="button" class="ttu-traveler-btn" id="hotels-children-minus">−</div>
+                  <span class="ttu-traveler-count" id="hotels-children-count">0</span>
+                  <div type="button" class="ttu-traveler-btn" id="hotels-children-plus">+</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ttu-search-wrap">
+            <button type="button" class="ttu-search-btn" id="search-hotels" style="width:100%;height:64px"
+              aria-label="Search hotels">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- More Panel -->
+      <div class="ttu-panel" id="panel-more">
+        <div class="ttu-more-panel">
+          <p>More travel services coming soon. Visit our main site for the full experience.</p>
+          <p style="margin-top:16px"><a href="https://traveltourup-next1.vercel.app/" target="_blank" rel="noopener">Go
+              to TravelTourUp →</a></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // ═══ CONFIG - Change this for your main site ═══
+      const MAIN_SITE = 'https://traveltourup-next1.vercel.app';
+
+      // Data
+      const AIRPORTS = [
+        { code: "JFK", name: "John F. Kennedy International Airport", city: "New York", country: "United States" },
+        { code: "LAX", name: "Los Angeles International Airport", city: "Los Angeles", country: "United States" },
+        { code: "ORD", name: "O'Hare International Airport", city: "Chicago", country: "United States" },
+        { code: "LHR", name: "Heathrow Airport", city: "London", country: "United Kingdom" },
+        { code: "DXB", name: "Dubai International Airport", city: "Dubai", country: "United Arab Emirates" },
+        { code: "CDG", name: "Charles de Gaulle Airport", city: "Paris", country: "France" },
+        { code: "SIN", name: "Changi Airport", city: "Singapore", country: "Singapore" },
+        { code: "HND", name: "Haneda Airport", city: "Tokyo", country: "Japan" },
+        { code: "SYD", name: "Sydney Airport", city: "Sydney", country: "Australia" },
+        { code: "FRA", name: "Frankfurt Airport", city: "Frankfurt", country: "Germany" },
+        { code: "MIA", name: "Miami International Airport", city: "Miami", country: "United States" },
+        { code: "DFW", name: "Dallas/Fort Worth International Airport", city: "Dallas", country: "United States" }
+      ];
+
+      const DESTINATIONS = [
+        { code: "NYC", name: "New York City", country: "United States", type: "City" },
+        { code: "LON", name: "London", country: "United Kingdom", type: "City" },
+        { code: "PAR", name: "Paris", country: "France", type: "City" },
+        { code: "TYO", name: "Tokyo", country: "Japan", type: "City" },
+        { code: "DXB", name: "Dubai", country: "United Arab Emirates", type: "City" },
+        { code: "SIN", name: "Singapore", country: "Singapore", type: "City" },
+        { code: "BKK", name: "Bangkok", country: "Thailand", type: "City" },
+        { code: "SYD", name: "Sydney", country: "Australia", type: "City" },
+        { code: "ROM", name: "Rome", country: "Italy", type: "City" },
+        { code: "BCN", name: "Barcelona", country: "Spain", type: "City" },
+        { code: "LAX", name: "Los Angeles", country: "United States", type: "City" },
+        { code: "CHI", name: "Chicago", country: "United States", type: "City" }
+      ];
+
+      // State
+      let fromAirport = null, toAirport = null;
+      let departDate = '', returnDate = '';
+      let adults = 1, children = 0, infants = 0;
+      let carsLocation = null, carsDate = '';
+      let carsAdults = 1, carsChildren = 0;
+      let hotelsDest = null, checkIn = '', checkOut = '';
+      let rooms = 1, hotelsAdults = 2, hotelsChildren = 0;
+
+      function formatDate(s) {
+        if (!s) return 'Select Date';
+        const d = new Date(s + 'T12:00:00');
+        return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      }
+
+      function toDateStr(y, m, day) {
+        return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+      }
+
+      function buildCalendar(id, selected, onSelect, year, month, opts) {
+        opts = opts || {};
+        const minDateStr = opts.minDate || null;
+        const cal = document.getElementById(id);
+        if (!cal) return;
+        const today = new Date();
+        const y = year != null ? year : today.getFullYear();
+        const m = month != null ? month : today.getMonth();
+        const daysInMonth = new Date(y, m + 1, 0).getDate();
+        const firstDay = new Date(y, m, 1).getDay();
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+        let html = '<div class="ttu-calendar-header">';
+        html += '<div type="button" class="ttu-calendar-nav" data-prev aria-label="Previous month"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></div>';
+        html += '<h3>' + monthNames[m] + ' ' + y + '</h3>';
+        html += '<div type="button" class="ttu-calendar-nav" data-next aria-label="Next month"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></div></div>';
+        html += '<div class="ttu-calendar-days">';
+        ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].forEach(function(d) { html += '<div class="ttu-calendar-day-label">' + d + '</div>'; });
+        for (let i = 0; i < firstDay; i++) html += '<div></div>';
+        const todayStr = toDateStr(today.getFullYear(), today.getMonth(), today.getDate());
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dateStr = toDateStr(y, m, day);
+          const isToday = dateStr === todayStr;
+          const isSel = selected === dateStr;
+          const isDisabled = minDateStr && dateStr < minDateStr;
+          let cls = 'ttu-calendar-day';
+          if (isToday) cls += ' today';
+          if (isSel) cls += ' selected';
+          if (isDisabled) cls += ' disabled';
+          html += '<div type="button" class="' + cls + '" data-date="' + dateStr + '"' + (isDisabled ? ' disabled' : '') + '>' + day + '</div>';
+        }
+        html += '</div>';
+        cal.innerHTML = html;
+
+        cal.querySelectorAll('[data-date]:not([disabled])').forEach(function(btn) {
+          btn.addEventListener('click', function(e) { e.stopPropagation(); onSelect(btn.dataset.date); });
+        });
+        cal.querySelector('[data-prev]').addEventListener('click', function(e) {
+          e.stopPropagation();
+          const nm = m === 0 ? 11 : m - 1, ny = m === 0 ? y - 1 : y;
+          buildCalendar(id, selected, onSelect, ny, nm, opts);
+        });
+        cal.querySelector('[data-next]').addEventListener('click', function(e) {
+          e.stopPropagation();
+          const nm = m === 11 ? 0 : m + 1, ny = m === 11 ? y + 1 : y;
+          buildCalendar(id, selected, onSelect, ny, nm, opts);
+        });
+      }
+
+      function getTodayStr() {
+        const d = new Date();
+        return toDateStr(d.getFullYear(), d.getMonth(), d.getDate());
+      }
+
+      function getNextDayStr(dateStr) {
+        const d = new Date(dateStr + 'T12:00:00');
+        d.setDate(d.getDate() + 1);
+        return toDateStr(d.getFullYear(), d.getMonth(), d.getDate());
+      }
+
+      function renderDropdown(container, items, renderItem, onSelect) {
+        container.innerHTML = '';
+        if (items.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'ttu-dropdown-item';
+          empty.style.cssText = 'color:var(--ttu-muted-fg);cursor:default';
+          empty.textContent = 'No results found';
+          container.appendChild(empty);
+          return;
+        }
+        items.forEach(item => {
+          const div = document.createElement('div');
+          div.className = 'ttu-dropdown-item';
+          div.innerHTML = renderItem(item);
+          div.addEventListener('click', (e) => { e.stopPropagation(); onSelect(item); });
+          container.appendChild(div);
+        });
+      }
+
+      // Tabs
+      document.querySelectorAll('.ttu-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          const t = tab.dataset.tab;
+          document.querySelectorAll('.ttu-tab').forEach(x => { x.classList.remove('active'); x.setAttribute('aria-pressed', 'false'); });
+          tab.classList.add('active'); tab.setAttribute('aria-pressed', 'true');
+          document.querySelectorAll('.ttu-panel').forEach(p => p.classList.remove('active'));
+          document.getElementById('panel-' + t).classList.add('active');
+        });
+      });
+
+      // Trip type - show/hide return
+      document.querySelectorAll('input[name="trip-type"]').forEach(r => {
+        r.addEventListener('change', () => {
+          const v = document.querySelector('input[name="trip-type"]:checked').value;
+          const ret = document.getElementById('return-field');
+          const grid = document.getElementById('flights-form');
+          ret.style.display = v === 'round-trip' ? '' : 'none';
+          grid.classList.toggle('round-trip', v === 'round-trip');
+        });
+      });
+      document.getElementById('return-field').style.display = 'none';
+
+      function filterAirports(list, q) {
+        if (!q || !q.trim()) return list;
+        const ql = q.toLowerCase().trim();
+        return list.filter(a =>
+          a.city.toLowerCase().includes(ql) ||
+          a.code.toLowerCase().includes(ql) ||
+          a.name.toLowerCase().includes(ql) ||
+          a.country.toLowerCase().includes(ql)
+        );
+      }
+
+      function openFromDropdown() {
+        document.getElementById('to-trigger').style.display = '';
+        document.getElementById('to-search-wrap').style.display = 'none';
+        document.getElementById('to-dropdown').style.display = 'none';
+        document.getElementById('from-trigger').style.display = 'none';
+        document.getElementById('from-search-wrap').style.display = 'flex';
+        document.getElementById('from-search-input').value = '';
+        document.getElementById('from-dropdown').style.display = 'block';
+        const q = document.getElementById('from-search-input').value;
+        renderDropdown(document.getElementById('from-dropdown'), filterAirports(AIRPORTS, q), a => `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div><div class="ttu-item-title">${a.city}</div><div class="ttu-item-sub">${a.name}</div></div>
+          <span class="ttu-item-code">${a.code}</span>
+        </div>
+        <div class="ttu-item-sub">${a.country}</div>
+      `, a => {
+          fromAirport = a;
+          document.getElementById('from-display').textContent = a.city + ' (' + a.code + ')';
+          document.getElementById('from-display').className = 'ttu-value';
+          closeFromDropdown();
+        });
+        setTimeout(() => document.getElementById('from-search-input').focus(), 50);
+      }
+
+      function closeFromDropdown() {
+        document.getElementById('from-trigger').style.display = '';
+        document.getElementById('from-search-wrap').style.display = 'none';
+        document.getElementById('from-dropdown').style.display = 'none';
+      }
+
+      function openToDropdown() {
+        document.getElementById('from-trigger').style.display = '';
+        document.getElementById('from-search-wrap').style.display = 'none';
+        document.getElementById('from-dropdown').style.display = 'none';
+        document.getElementById('to-trigger').style.display = 'none';
+        document.getElementById('to-search-wrap').style.display = 'flex';
+        document.getElementById('to-search-input').value = '';
+        document.getElementById('to-dropdown').style.display = 'block';
+        const q = document.getElementById('to-search-input').value;
+        renderDropdown(document.getElementById('to-dropdown'), filterAirports(AIRPORTS, q), a => `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div><div class="ttu-item-title">${a.city}</div><div class="ttu-item-sub">${a.name}</div></div>
+          <span class="ttu-item-code">${a.code}</span>
+        </div>
+        <div class="ttu-item-sub">${a.country}</div>
+      `, a => {
+          toAirport = a;
+          document.getElementById('to-display').textContent = a.city + ' (' + a.code + ')';
+          document.getElementById('to-display').className = 'ttu-value';
+          closeToDropdown();
+        });
+        setTimeout(() => document.getElementById('to-search-input').focus(), 50);
+      }
+
+      function closeToDropdown() {
+        document.getElementById('to-trigger').style.display = '';
+        document.getElementById('to-search-wrap').style.display = 'none';
+        document.getElementById('to-dropdown').style.display = 'none';
+      }
+
+      document.getElementById('from-trigger').addEventListener('click', (e) => { e.stopPropagation(); openFromDropdown(); });
+      document.getElementById('to-trigger').addEventListener('click', (e) => { e.stopPropagation(); openToDropdown(); });
+
+      document.getElementById('from-search-input').addEventListener('input', () => {
+        const q = document.getElementById('from-search-input').value;
+        renderDropdown(document.getElementById('from-dropdown'), filterAirports(AIRPORTS, q), a => `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div><div class="ttu-item-title">${a.city}</div><div class="ttu-item-sub">${a.name}</div></div>
+          <span class="ttu-item-code">${a.code}</span>
+        </div>
+        <div class="ttu-item-sub">${a.country}</div>
+      `, a => {
+          fromAirport = a;
+          document.getElementById('from-display').textContent = a.city + ' (' + a.code + ')';
+          document.getElementById('from-display').className = 'ttu-value';
+          closeFromDropdown();
+        });
+      });
+
+      document.getElementById('to-search-input').addEventListener('input', () => {
+        const q = document.getElementById('to-search-input').value;
+        renderDropdown(document.getElementById('to-dropdown'), filterAirports(AIRPORTS, q), a => `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div><div class="ttu-item-title">${a.city}</div><div class="ttu-item-sub">${a.name}</div></div>
+          <span class="ttu-item-code">${a.code}</span>
+        </div>
+        <div class="ttu-item-sub">${a.country}</div>
+      `, a => {
+          toAirport = a;
+          document.getElementById('to-display').textContent = a.city + ' (' + a.code + ')';
+          document.getElementById('to-display').className = 'ttu-value';
+          closeToDropdown();
+        });
+      });
+
+      document.getElementById('swap-btn').addEventListener('click', () => {
+        if (fromAirport && toAirport) {
+          const t = fromAirport; fromAirport = toAirport; toAirport = t;
+          document.getElementById('from-display').textContent = fromAirport.city + ' (' + fromAirport.code + ')';
+          document.getElementById('to-display').textContent = toAirport.city + ' (' + toAirport.code + ')';
+        }
+      });
+
+      // Depart calendar - min today, no past dates
+      const departTrigger = document.getElementById('depart-trigger');
+      departTrigger.addEventListener('click', () => {
+        const cal = document.getElementById('depart-calendar');
+        cal.style.display = cal.style.display === 'none' ? 'block' : 'none';
+        document.getElementById('return-calendar').style.display = 'none';
+        if (cal.style.display === 'block') {
+          buildCalendar('depart-calendar', departDate, function(d) {
+            departDate = d;
+            document.getElementById('depart-display').textContent = formatDate(d);
+            document.getElementById('depart-display').className = 'ttu-value';
+            cal.style.display = 'none';
+          }, null, null, { minDate: getTodayStr() });
+        }
+      });
+
+      // Return calendar - min is depart date (or today), opens on depart month
+      const returnTrigger = document.getElementById('return-trigger');
+      returnTrigger.addEventListener('click', () => {
+        const cal = document.getElementById('return-calendar');
+        cal.style.display = cal.style.display === 'none' ? 'block' : 'none';
+        document.getElementById('depart-calendar').style.display = 'none';
+        if (cal.style.display === 'block') {
+          var minD = departDate || getTodayStr();
+          var initY = null, initM = null;
+          if (departDate) {
+            var dep = new Date(departDate + 'T12:00:00');
+            initY = dep.getFullYear();
+            initM = dep.getMonth();
+          }
+          buildCalendar('return-calendar', returnDate, function(d) {
+            returnDate = d;
+            document.getElementById('return-display').textContent = formatDate(d);
+            document.getElementById('return-display').className = 'ttu-value';
+            cal.style.display = 'none';
+          }, initY, initM, { minDate: minD });
+        }
+      });
+
+      // Travelers
+      function updateTravelersDisplay() {
+        const t = adults + children + infants;
+        document.getElementById('travelers-display').textContent = t + ' Traveler' + (t !== 1 ? 's' : '');
+      }
+      document.getElementById('adults-plus').addEventListener('click', () => { adults++; document.getElementById('adults-count').textContent = adults; updateTravelersDisplay(); });
+      document.getElementById('adults-minus').addEventListener('click', () => { if (adults > 1) { adults--; document.getElementById('adults-count').textContent = adults; updateTravelersDisplay(); } });
+      document.getElementById('children-plus').addEventListener('click', () => { children++; document.getElementById('children-count').textContent = children; updateTravelersDisplay(); });
+      document.getElementById('children-minus').addEventListener('click', () => { if (children > 0) { children--; document.getElementById('children-count').textContent = children; updateTravelersDisplay(); } });
+      document.getElementById('infants-plus').addEventListener('click', () => { if (infants < 4) { infants++; document.getElementById('infants-count').textContent = infants; updateTravelersDisplay(); } });
+      document.getElementById('infants-minus').addEventListener('click', () => { if (infants > 0) { infants--; document.getElementById('infants-count').textContent = infants; updateTravelersDisplay(); } });
+
+      document.getElementById('travelers-trigger').addEventListener('click', () => {
+        const d = document.getElementById('travelers-dropdown');
+        d.style.display = d.style.display === 'none' ? 'block' : 'none';
+      });
+
+      // Search Flights
+      document.getElementById('search-flights').addEventListener('click', () => {
+        const params = new URLSearchParams();
+        if (fromAirport) params.set('from', fromAirport.code);
+        if (toAirport) params.set('to', toAirport.code);
+        if (departDate) params.set('departure_date', departDate);
+        if (document.querySelector('input[name="trip-type"]:checked').value === 'round-trip' && returnDate) params.set('return_date', returnDate);
+        params.set('trip_type', document.querySelector('input[name="trip-type"]:checked').value);
+        params.set('adults', adults);
+        params.set('children', children);
+        params.set('infants', infants);
+        params.set('cabin_class', document.getElementById('cabin-class').value);
+        params.set('source_domain', window.location.hostname || 'wordpress');
+        window.location.href = MAIN_SITE + '/flights' + (params.toString() ? '?' + params.toString() : '');
+      });
+
+      // Cars
+      const carsFromTrigger = document.getElementById('cars-from-trigger');
+      const carsFromDropdown = document.getElementById('cars-from-dropdown');
+      carsFromTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = carsFromDropdown.style.display === 'block';
+        carsFromDropdown.style.display = isOpen ? 'none' : 'block';
+        if (!isOpen) {
+          renderDropdown(carsFromDropdown, AIRPORTS, a => `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div><div class="ttu-item-title">${a.city}</div><div class="ttu-item-sub">${a.name}</div></div>
+            <span class="ttu-item-code">${a.code}</span>
+          </div>
+          <div class="ttu-item-sub">${a.country}</div>
+        `, a => { carsLocation = a; document.getElementById('cars-from-display').textContent = a.city + ' (' + a.code + ')'; document.getElementById('cars-from-display').className = 'ttu-value'; carsFromDropdown.style.display = 'none'; });
+        }
+      });
+
+      document.getElementById('cars-date-trigger').addEventListener('click', () => {
+        const cal = document.getElementById('cars-date-calendar');
+        cal.style.display = cal.style.display === 'none' ? 'block' : 'none';
+        if (cal.style.display === 'block') {
+          buildCalendar('cars-date-calendar', carsDate, function(d) {
+            carsDate = d;
+            document.getElementById('cars-date-display').textContent = formatDate(d);
+            document.getElementById('cars-date-display').className = 'ttu-value';
+            cal.style.display = 'none';
+          }, null, null, { minDate: getTodayStr() });
+        }
+      });
+
+      function updateCarsTravelersDisplay() {
+        const t = carsAdults + carsChildren;
+        document.getElementById('cars-travelers-display').textContent = t + ' Traveler' + (t !== 1 ? 's' : '');
+      }
+      document.getElementById('cars-adults-plus').addEventListener('click', () => { carsAdults++; document.getElementById('cars-adults-count').textContent = carsAdults; updateCarsTravelersDisplay(); });
+      document.getElementById('cars-adults-minus').addEventListener('click', () => { if (carsAdults > 1) { carsAdults--; document.getElementById('cars-adults-count').textContent = carsAdults; updateCarsTravelersDisplay(); } });
+      document.getElementById('cars-children-plus').addEventListener('click', () => { carsChildren++; document.getElementById('cars-children-count').textContent = carsChildren; updateCarsTravelersDisplay(); });
+      document.getElementById('cars-children-minus').addEventListener('click', () => { if (carsChildren > 0) { carsChildren--; document.getElementById('cars-children-count').textContent = carsChildren; updateCarsTravelersDisplay(); } });
+      document.getElementById('cars-travelers-trigger').addEventListener('click', () => {
+        const d = document.getElementById('cars-travelers-dropdown');
+        d.style.display = d.style.display === 'none' ? 'block' : 'none';
+      });
+
+      document.getElementById('search-cars').addEventListener('click', () => {
+        const params = new URLSearchParams();
+        if (carsLocation) params.set('from', carsLocation.code);
+        if (carsDate) params.set('date', carsDate);
+        params.set('adults', carsAdults);
+        params.set('children', carsChildren);
+        params.set('source_domain', window.location.hostname || 'wordpress');
+        window.location.href = MAIN_SITE + '/cars' + (params.toString() ? '?' + params.toString() : '');
+      });
+
+      // Hotels
+      const hotelsDestTrigger = document.getElementById('hotels-dest-trigger');
+      const hotelsDestDropdown = document.getElementById('hotels-dest-dropdown');
+      hotelsDestTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = hotelsDestDropdown.style.display === 'block';
+        hotelsDestDropdown.style.display = isOpen ? 'none' : 'block';
+        if (!isOpen) {
+          renderDropdown(hotelsDestDropdown, DESTINATIONS, d => `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div><div class="ttu-item-title">${d.name}</div><div class="ttu-item-sub">${d.country}</div></div>
+            <span class="ttu-item-code">${d.type}</span>
+          </div>
+        `, d => { hotelsDest = d; document.getElementById('hotels-dest-display').textContent = d.name + ', ' + d.country; document.getElementById('hotels-dest-display').className = 'ttu-value'; hotelsDestDropdown.style.display = 'none'; });
+        }
+      });
+
+      document.getElementById('checkin-trigger').addEventListener('click', () => {
+        const cal = document.getElementById('checkin-calendar');
+        cal.style.display = cal.style.display === 'none' ? 'block' : 'none';
+        document.getElementById('checkout-calendar').style.display = 'none';
+        if (cal.style.display === 'block') {
+          buildCalendar('checkin-calendar', checkIn, function(d) {
+            checkIn = d;
+            document.getElementById('checkin-display').textContent = formatDate(d);
+            document.getElementById('checkin-display').className = 'ttu-value';
+            cal.style.display = 'none';
+          }, null, null, { minDate: getTodayStr() });
+        }
+      });
+      document.getElementById('checkout-trigger').addEventListener('click', () => {
+        const cal = document.getElementById('checkout-calendar');
+        cal.style.display = cal.style.display === 'none' ? 'block' : 'none';
+        document.getElementById('checkin-calendar').style.display = 'none';
+        if (cal.style.display === 'block') {
+          var minD = checkIn ? getNextDayStr(checkIn) : getTodayStr();
+          var initY = null, initM = null;
+          if (checkIn) {
+            var chk = new Date(checkIn + 'T12:00:00');
+            initY = chk.getFullYear();
+            initM = chk.getMonth();
+          }
+          buildCalendar('checkout-calendar', checkOut, function(d) {
+            checkOut = d;
+            document.getElementById('checkout-display').textContent = formatDate(d);
+            document.getElementById('checkout-display').className = 'ttu-value';
+            cal.style.display = 'none';
+          }, initY, initM, { minDate: minD });
+        }
+      });
+
+      function updateHotelsRoomsDisplay() {
+        const total = hotelsAdults + hotelsChildren;
+        document.getElementById('hotels-rooms-display').textContent = rooms + ' Room' + (rooms > 1 ? 's' : '') + ', ' + total + ' Traveler' + (total !== 1 ? 's' : '');
+      }
+      document.getElementById('rooms-plus').addEventListener('click', () => { rooms++; document.getElementById('rooms-count').textContent = rooms; updateHotelsRoomsDisplay(); });
+      document.getElementById('rooms-minus').addEventListener('click', () => { if (rooms > 1) { rooms--; document.getElementById('rooms-count').textContent = rooms; updateHotelsRoomsDisplay(); } });
+      document.getElementById('hotels-adults-plus').addEventListener('click', () => { hotelsAdults++; document.getElementById('hotels-adults-count').textContent = hotelsAdults; updateHotelsRoomsDisplay(); });
+      document.getElementById('hotels-adults-minus').addEventListener('click', () => { if (hotelsAdults > 1) { hotelsAdults--; document.getElementById('hotels-adults-count').textContent = hotelsAdults; updateHotelsRoomsDisplay(); } });
+      document.getElementById('hotels-children-plus').addEventListener('click', () => { hotelsChildren++; document.getElementById('hotels-children-count').textContent = hotelsChildren; updateHotelsRoomsDisplay(); });
+      document.getElementById('hotels-children-minus').addEventListener('click', () => { if (hotelsChildren > 0) { hotelsChildren--; document.getElementById('hotels-children-count').textContent = hotelsChildren; updateHotelsRoomsDisplay(); } });
+      document.getElementById('hotels-rooms-trigger').addEventListener('click', () => {
+        const d = document.getElementById('hotels-rooms-dropdown');
+        d.style.display = d.style.display === 'none' ? 'block' : 'none';
+      });
+      updateHotelsRoomsDisplay();
+
+      document.getElementById('search-hotels').addEventListener('click', () => {
+        const params = new URLSearchParams();
+        if (hotelsDest) params.set('destination', hotelsDest.code);
+        if (checkIn) params.set('check_in', checkIn);
+        if (checkOut) params.set('check_out', checkOut);
+        params.set('rooms', rooms);
+        params.set('adults', hotelsAdults);
+        params.set('children', hotelsChildren);
+        params.set('source_domain', window.location.hostname || 'wordpress');
+        window.location.href = MAIN_SITE + '/hotels' + (params.toString() ? '?' + params.toString() : '');
+      });
+
+      // Close dropdowns on outside click
+      document.addEventListener('click', e => {
+        if (!e.target.closest('#from-field-wrap') && !e.target.closest('#to-field-wrap')) {
+          closeFromDropdown();
+          closeToDropdown();
+        }
+        if (!e.target.closest('.ttu-field')) {
+          document.getElementById('cars-from-dropdown').style.display = 'none';
+          document.getElementById('hotels-dest-dropdown').style.display = 'none';
+        }
+        if (!e.target.closest('.ttu-field') && !e.target.closest('.ttu-traveler-dropdown') && !e.target.closest('.ttu-calendar')) {
+          document.querySelectorAll('.ttu-traveler-dropdown, .ttu-calendar').forEach(el => { el.style.display = 'none'; });
+        }
+      });
+
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+          closeFromDropdown();
+          closeToDropdown();
+          document.getElementById('cars-from-dropdown').style.display = 'none';
+          document.getElementById('hotels-dest-dropdown').style.display = 'none';
+          document.querySelectorAll('.ttu-traveler-dropdown, .ttu-calendar').forEach(el => { el.style.display = 'none'; });
+        }
+      });
+    })();
+  </script>
+</body>
+
+</html>

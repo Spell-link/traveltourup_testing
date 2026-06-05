@@ -93,7 +93,7 @@ export default function LoginCom({
   const LegalLink = adminGate ? NextLink : Link;
 
   return (
-    <div className="w-full">
+    <div className="w-full min-w-0 overflow-x-hidden">
       <header className="mb-4 text-center md:mb-6">
         <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">{title}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>

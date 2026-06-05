@@ -100,6 +100,8 @@ export function staysRateToHotelRoom(rate: StaysRateRow, nights: number): HotelR
     totalStayCurrency: rate.total_currency,
     stayNights: nights,
     cancellationTimeline: rate.cancellation_timeline,
+    boardType: rate.board_type,
+    paymentType: rate.payment_type,
     negotiatedRateId: rate.negotiated_rate_id,
     supportedLoyaltyProgramme: rate.supported_loyalty_programme,
     rateConditions: rate.conditions,

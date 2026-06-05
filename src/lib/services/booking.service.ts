@@ -9,6 +9,11 @@ import {
   bookingRepository,
   type BookingWithChildren,
 } from "@/lib/db/repositories/booking.repository";
+import { checkoutPaymentRepository } from "@/lib/db/repositories/checkout-payment.repository";
+import {
+  checkoutPaymentToSnapshot,
+  type StaysCheckoutPaymentSnapshot,
+} from "@/lib/stays/stays-booking-display";
 import {
   serializeBookingListWithRelations,
   serializeBookingWithRelations,
@@ -106,15 +111,17 @@ export async function getBookingById(input: {
     throw new ForbiddenError();
   }
 
-  if (row.type === "flight" && row.status === "confirmed") {
-    const { reconcileFlightBookingTotalFromConfirmedChange } = await import(
-      "@/lib/services/flights/flight-order-change.service"
-    );
-    await reconcileFlightBookingTotalFromConfirmedChange(row.id);
-    row = (await bookingRepository.findById(input.id)) ?? row;
+  const serialized = serializeBookingResponse(row);
+  if (row.type !== "hotel") {
+    return serialized;
   }
 
-  return serializeBookingResponse(row);
+  const payment = await checkoutPaymentRepository.findFirstByBookingId(row.id);
+  const pricing_breakdown: StaysCheckoutPaymentSnapshot | null = payment
+    ? checkoutPaymentToSnapshot(payment)
+    : null;
+
+  return { ...serialized, pricing_breakdown };
 }
 
 export async function createBooking(input: {

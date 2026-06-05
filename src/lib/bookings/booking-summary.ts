@@ -64,7 +64,7 @@ function firstSliceFromItinerary(snapshot: unknown): {
   return { origin, destination: dest, departLabel };
 }
 
-function accommodationName(snapshot: unknown): string | null {
+export function accommodationName(snapshot: unknown): string | null {
   if (!snapshot || typeof snapshot !== "object") return null;
   const name = (snapshot as { name?: string }).name;
   if (typeof name === "string" && name.trim()) return name.trim();

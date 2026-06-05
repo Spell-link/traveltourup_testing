@@ -16,7 +16,6 @@ export default function patchUR(d) {
     account: "اکاؤنٹ",
     profile: "پروفائل",
     bookings: "بکنگز",
-    wishlists: "وش لسٹس",
     adminConsole: "ایڈمن کنسول",
     logout: "لاگ آؤٹ",
     login: "لاگ ان",

@@ -45,6 +45,16 @@ export const bookingConfirmationPropsSchema = z.object({
   statusNote: z.string().min(1).max(500).optional(),
   /** When true, template may show attachment hint (PDF sent separately). */
   itineraryAttached: z.boolean().optional(),
+  /** Hotel: structured guest block (multiline). */
+  guestsDetail: z.string().min(1).max(2000).optional(),
+  contactEmail: z.string().min(1).max(200).optional(),
+  contactPhone: z.string().min(1).max(40).optional(),
+  specialRequests: z.string().min(1).max(1000).optional(),
+  loyaltyProgrammeAccountNumber: z.string().min(1).max(80).optional(),
+  billingRoom: z.string().min(1).max(80).optional(),
+  billingServiceFee: z.string().min(1).max(80).optional(),
+  billingTotalPaid: z.string().min(1).max(80).optional(),
+  billingPayAtHotel: z.string().min(1).max(80).optional(),
 });
 
 export const paymentReceiptPropsSchema = z.object({

@@ -17,14 +17,15 @@ type Props = {
   /** Async grid (e.g. Suspense + server fetch) or client-loaded cards; heading + hero render immediately. */
   cardsSlot: ReactNode;
   bgColor?: string;
+  mainPading?: string;
 };
 
-export function FeaturedFlightsShell({ cardsSlot, bgColor = "bg-muted" }: Props) {
+export function FeaturedFlightsShell({ cardsSlot, bgColor = "bg-muted", mainPading = "py-10" }: Props) {
   const locale = useLocale();
   const t = useTranslations("Featured");
 
   return (
-    <section className={`py-10 ${bgColor}`}>
+    <section className={`${bgColor} ${mainPading}`}>
       <div className="container mx-auto px-4 md:px-10 ">
         <SectionHeading title={t("flightsHeading")} subtitle={t("flightsSubtitle")} />
 

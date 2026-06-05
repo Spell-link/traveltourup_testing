@@ -28,7 +28,13 @@ const Cars = (): React.ReactElement => {
     <div>
       <main>
         <HubPageH1 page="Cars" />
-        <div className="bg-muted pt-10 px-4 md:px-10 "><CarsTab /></div>
+        <div className="relative top-0 bg-muted p-2">
+          <div className="relative  top-[-40px]   z-20  ">
+            <div id="hotel-search" className="max-w-7xl  mx-auto bg-background/80 rounded-xl shadow-xl border border-border/50">
+              <div className="p-4 sm:p-6"><CarsTab />  </div>
+            </div>
+          </div>
+        </div>
         <CarList />
         <RecommendedCars featuredCar={featuredCarData} cars={carsData} bgColor="bg-muted/40" />
       </main>

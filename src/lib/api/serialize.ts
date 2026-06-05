@@ -6,6 +6,7 @@ import type {
   FlightBooking,
   FlightOrderCancellation,
   HotelBooking,
+  StaysBookingCancellation,
   Prisma,
 } from "@/generated/prisma";
 
@@ -84,7 +85,30 @@ export function serializeCarBookingRow(row: CarBooking) {
   };
 }
 
-export function serializeHotelBookingRow(row: HotelBooking) {
+type HotelBookingSerialized = HotelBooking & {
+  cancellations?: StaysBookingCancellation[];
+};
+
+function serializeStaysCancellationRow(row: StaysBookingCancellation) {
+  return {
+    id: row.id,
+    hotel_booking_id: row.hotel_booking_id,
+    duffel_booking_id: row.duffel_booking_id,
+    status: row.status,
+    refund_amount: row.refund_amount,
+    refund_currency: row.refund_currency,
+    customer_refund_amount: row.customer_refund_amount,
+    customer_refund_currency: row.customer_refund_currency,
+    confirmed_at: row.confirmed_at?.toISOString() ?? null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+export function serializeHotelBookingRow(row: HotelBookingSerialized) {
+  const voucherReady = Boolean(row.confirmation_pdf_storage_path);
+  const voucherGenerationFailed =
+    Boolean(row.confirmation_pdf_generation_failed_at) && !row.confirmation_pdf_storage_path;
   return {
     id: row.id,
     booking_id: row.booking_id,
@@ -97,6 +121,10 @@ export function serializeHotelBookingRow(row: HotelBooking) {
     accommodation_snapshot: row.accommodation_snapshot,
     stays_raw: row.stays_raw,
     payload: row.payload,
+    cancellations: (row.cancellations ?? []).map(serializeStaysCancellationRow),
+    voucher_ready: voucherReady,
+    voucher_generated_at: row.confirmation_pdf_generated_at?.toISOString() ?? null,
+    voucher_generation_failed: voucherGenerationFailed,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -170,6 +198,9 @@ export function serializeFlightBookingListRow(
 export function serializeHotelBookingListRow(
   row: NonNullable<BookingWithListChildren["hotelBooking"]>,
 ) {
+  const voucherReady = Boolean(row.confirmation_pdf_storage_path);
+  const voucherGenerationFailed =
+    Boolean(row.confirmation_pdf_generation_failed_at) && !row.confirmation_pdf_storage_path;
   return {
     id: row.id,
     booking_id: row.booking_id,
@@ -180,6 +211,9 @@ export function serializeHotelBookingListRow(
     booking_reference: row.booking_reference,
     quote_expires_at: row.quote_expires_at?.toISOString() ?? null,
     accommodation_snapshot: row.accommodation_snapshot,
+    voucher_ready: voucherReady,
+    voucher_generated_at: row.confirmation_pdf_generated_at?.toISOString() ?? null,
+    voucher_generation_failed: voucherGenerationFailed,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

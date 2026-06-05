@@ -5,9 +5,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { handleApiError } from "@/lib/api/error-handler";
 import { successResponse } from "@/lib/api/response";
 import { ensureUserProfileForAuthUser } from "@/lib/authz/profile";
+import { markPhoneVerificationRequired, PHONE_VERIFY_METADATA } from "@/lib/auth/phone-verification";
+import { sendPhoneOtpWithClient, verifyPhoneOtpWithClient } from "@/lib/auth/phone-otp.service";
+import { clientIpFromHeaders } from "@/lib/api/rate-limit-ip";
 import {
   loginSchema,
   signupSchema,
+  phoneOtpSendSchema,
+  phoneOtpVerifySchema,
   refreshTokenSchema,
   forgotPasswordSchema,
 } from "@/lib/validations/auth.schema";
@@ -81,14 +86,19 @@ export async function handleLogin(req: NextRequest): Promise<Response> {
 export async function handleSignup(req: NextRequest): Promise<Response> {
   try {
     const body = await req.json();
-    const { email, password, first_name, last_name, redirect_to } = signupSchema.parse(body);
+    const { email, password, first_name, last_name, phone, redirect_to } = signupSchema.parse(body);
 
     const supabase = createAnonClient();
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { first_name, last_name },
+        data: {
+          first_name,
+          last_name,
+          [PHONE_VERIFY_METADATA.required]: true,
+          [PHONE_VERIFY_METADATA.verified]: false,
+        },
         ...(redirect_to && { emailRedirectTo: redirect_to }),
       },
     });
@@ -97,11 +107,35 @@ export async function handleSignup(req: NextRequest): Promise<Response> {
     if (!data.user) return authError("Signup failed", 400);
 
     await ensureUserProfileForAuthUser({ id: data.user.id, first_name, last_name });
+    await markPhoneVerificationRequired(data.user.id);
 
     if (!data.session) {
+      return authError(
+        "Session missing after signup. Disable email confirmation in Supabase Authentication → Email.",
+        400,
+      );
+    }
+
+    const ip = clientIpFromHeaders((name) => req.headers.get(name));
+    const authed = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        global: { headers: { Authorization: `Bearer ${data.session.access_token}` } },
+      },
+    );
+
+    const otpResult = await sendPhoneOtpWithClient(authed, phone, ip);
+    if (otpResult.error) {
       return successResponse(
         {
-          message: "Please check your email to confirm your account.",
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+          expires_in: data.session.expires_in,
+          token_type: "bearer",
+          phone_verification_required: true,
+          phone_otp_error: otpResult.error,
           user: { id: data.user.id, email: data.user.email },
         },
         201,
@@ -114,10 +148,88 @@ export async function handleSignup(req: NextRequest): Promise<Response> {
         refresh_token: data.session.refresh_token,
         expires_in: data.session.expires_in,
         token_type: "bearer",
+        phone_verification_required: true,
         user: { id: data.user.id, email: data.user.email },
       },
       201,
     );
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function handlePhoneSendOtp(req: NextRequest): Promise<Response> {
+  try {
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return authError("Bearer token required", 401);
+    }
+
+    const body = await req.json();
+    const { phone, resend } = phoneOtpSendSchema.parse(body);
+    const token = authHeader.slice(7).trim();
+
+    const authed = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      },
+    );
+
+    const ip = clientIpFromHeaders((name) => req.headers.get(name));
+    const result = await sendPhoneOtpWithClient(authed, phone, ip, { resend: resend === true });
+    if (result.error) {
+      return authError(result.error, 400);
+    }
+
+    return successResponse({ message: "Verification code sent.", masked_phone: result.masked });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function handlePhoneVerifyOtp(req: NextRequest): Promise<Response> {
+  try {
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return authError("Bearer token required", 401);
+    }
+
+    const body = await req.json();
+    const { phone, token: otpToken } = phoneOtpVerifySchema.parse(body);
+    const bearer = authHeader.slice(7).trim();
+
+    const authed = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        global: { headers: { Authorization: `Bearer ${bearer}` } },
+      },
+    );
+
+    const {
+      data: { user },
+    } = await authed.auth.getUser();
+    if (!user) {
+      return authError("Invalid session", 401);
+    }
+
+    const ip = clientIpFromHeaders((name) => req.headers.get(name));
+    const result = await verifyPhoneOtpWithClient(authed, {
+      phone,
+      token: otpToken,
+      userId: user.id,
+      clientIp: ip,
+    });
+
+    if (result.error) {
+      return authError(result.error, 400);
+    }
+
+    return successResponse({ message: "Phone verified.", phone_verification_required: false });
   } catch (error) {
     return handleApiError(error);
   }

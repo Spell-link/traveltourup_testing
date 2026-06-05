@@ -5,6 +5,7 @@ import FlightsTab from "@/components/flights/FlightsTab";
 import FlightList from "@/components/flights/FlightList";
 import FeaturedFlights from "@/components/flights/FeaturedFlights";
 import { FeaturedFlightsSectionFallback } from "@/components/flights/FlightSkeletons";
+import { cn } from "@/lib/utils";
 
 type Props = { layout: FlightsPageLayout };
 
@@ -12,20 +13,29 @@ const Flights = ({ layout }: Props): React.ReactElement => {
   const showResults = layout === "results";
 
   return (
-    <div>
-      <main>
-        <HubPageH1 page="Flights" />
-        {!showResults ? (
-          <div id="flight-search" className="bg-muted pt-10 px-4 md:px-10 scroll-mt-16">
-            <FlightsTab />
+    <main>
+      <HubPageH1 page="Flights" />
+
+      {/* Search card overlapping the top section */}
+      {!showResults && (
+        <div className="relative top-0 bg-muted p-2 sm:p-0">
+          <div className="relative  sm:top-[-50px] top-[-40px]   z-20  ">
+            <div id="flight-search" className="max-w-7xl  mx-auto bg-background/80 rounded-xl shadow-xl border border-border/50">
+              <div className="p-4 sm:p-6">
+                <FlightsTab />
+              </div>
+            </div>
           </div>
-        ) : null}
-        {showResults ? <FlightList /> : null}
-        <Suspense fallback={<FeaturedFlightsSectionFallback bgColor="bg-muted/40" />}>
-          <FeaturedFlights bgColor="bg-muted/40" />
-        </Suspense>
-      </main>
-    </div>
+        </div>
+      )}
+      {showResults && <FlightList />}
+
+      <Suspense fallback={<FeaturedFlightsSectionFallback bgColor="bg-muted/40" />}>
+        <div className="bg-muted">
+          <FeaturedFlights bgColor="bg-muted" mainPading="pt-1" />
+        </div>
+      </Suspense>
+    </main>
   );
 };
 

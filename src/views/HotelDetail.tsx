@@ -5,7 +5,6 @@ import { DetailPageLayout } from "@/components/shared/DetailPageLayout";
 import { BookingSidebar } from "@/components/shared/BookingSidebar";
 import { ReviewsSection } from "@/components/shared/ReviewsSection";
 import { HotelDetailContent } from "@/components/hotels/HotelDetailContent";
-import { WishlistToggle } from "@/components/wishlist/WishlistToggle";
 import type { MockHotel, HotelRoom } from "@/data/mock-hotels";
 import { getDefaultRooms } from "@/data/mock-hotels";
 import { useBookingBreadcrumbHotelTitle } from "@/components/shared/BookingBreadcrumbHotelContext";
@@ -60,15 +59,6 @@ export default function HotelDetail({ hotel }: HotelDetailProps) {
     <DetailPageLayout
       mainContent={
         <div>
-          <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-            <WishlistToggle
-              type="hotel"
-              refId={String(hotel.id)}
-              title={hotel.name}
-              subtitle={hotel.area || hotel.address}
-              imageUrl={hotel.images[0] ?? null}
-            />
-          </div>
           <HotelDetailContent
             hotel={hotel}
             selectedRooms={selectedRooms}

@@ -51,6 +51,7 @@ import { loadFlightPassengerValidationContext } from "@/lib/flights/flight-check
 import { assertPassengersMatchOffer } from "@/lib/validations/flight-checkout.schema";
 import { hasPermission, type AuthzContext } from "@/lib/authz";
 import { ForbiddenError } from "@/lib/authz/errors";
+import { trackJourneyEvent } from "@/lib/services/journey/customer-journey.service";
 
 function bookingRef(): string {
   const t = Date.now().toString(36);
@@ -512,6 +513,18 @@ export async function createDuffelInstantFlightBooking(input: {
     },
   });
 
+  trackJourneyEvent({
+    userId: input.userId,
+    eventType: "booking.confirmed",
+    productType: "flight",
+    productRef: offer.id,
+    stage: "booking_confirmed",
+    convertedBookingId: row.id,
+    properties: { booking_ref_no: row.booking_ref_no, duffel_order_id: parsed.orderId },
+    priceAmount: parsed.totalAmount,
+    priceCurrency: parsed.totalCurrency,
+  });
+
   return serializeBookingResponse(row);
 }
 
@@ -620,6 +633,18 @@ export async function createDuffelHoldFlightBooking(input: {
       itinerary_snapshot: offer as unknown as Prisma.InputJsonValue,
       order_raw: parsed.data as unknown as Prisma.InputJsonValue,
     },
+  });
+
+  trackJourneyEvent({
+    userId: input.userId,
+    eventType: "booking.confirmed",
+    productType: "flight",
+    productRef: offer.id,
+    stage: "booking_confirmed",
+    convertedBookingId: row.id,
+    properties: { booking_ref_no: row.booking_ref_no, order_mode: "hold" },
+    priceAmount: parsed.totalAmount,
+    priceCurrency: parsed.totalCurrency,
   });
 
   return serializeBookingResponse(row);

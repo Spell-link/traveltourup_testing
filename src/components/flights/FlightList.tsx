@@ -86,8 +86,8 @@ const PLACEHOLDER_CHANGE_BOOKING = {} as OriginalBookingContext;
 function stopsAllowed(stops: number, mode: string): boolean {
   if (mode === "any") return true;
   if (mode === "direct") return stops === 0;
-  if (mode === "one") return stops <= 1;
-  if (mode === "two") return stops <= 2;
+  if (mode === "one") return stops === 1;
+  if (mode === "two") return stops === 2;
   return true;
 }
 
@@ -462,7 +462,7 @@ const FlightList = ({ flowContext = NEW_BOOKING_FLOW }: FlightListProps) => {
     if (selectedAirline) {
       result = result.filter((f) => f.airlineCode === selectedAirline);
     }
-
+   
     result = result.filter((f) => stopsAllowed(f.stops, stopsMode));
 
     const fnq = flightNumberQuery.replace(/\s+/g, "").trim();

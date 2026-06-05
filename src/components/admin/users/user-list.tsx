@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState, useTransition } from "react";
-import { Heart, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import type { z } from "zod";
 import { userAdminListQuerySchema } from "@/lib/validations/user.schema";
 import { deleteUser } from "@/lib/http/user.client";
@@ -187,14 +187,6 @@ export function UserList({ rows, total, query, roles }: UserListProps) {
     }
   }, [deleteTarget, router, startListTransition]);
 
-  const wishlistsAction: ActionMenuItem<UserListRow> = {
-    label: "Wishlists",
-    icon: <Heart className="h-4 w-4" />,
-    onClick: (row) => {
-      navigate(`/admin/wishlists?user_id=${encodeURIComponent(row.id)}&page=1`);
-    },
-  };
-
   const deleteAction: ActionMenuItem<UserListRow> = {
     label: "Delete",
     icon: <Trash2 className="h-4 w-4" />,
@@ -283,7 +275,7 @@ export function UserList({ rows, total, query, roles }: UserListProps) {
             onClick: (row) => router.push(`/admin/users/${row.id}`),
           },
         }}
-        customActions={[wishlistsAction, deleteAction]}
+        customActions={[deleteAction]}
       />
     </div>
   );

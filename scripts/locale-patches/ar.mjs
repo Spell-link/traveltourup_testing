@@ -16,7 +16,6 @@ export default function patchAR(d) {
     account: "الحساب",
     profile: "الملف الشخصي",
     bookings: "الحجوزات",
-    wishlists: "قوائم الرغبات",
     adminConsole: "لوحة الإدارة",
     logout: "تسجيل الخروج",
     login: "تسجيل الدخول",

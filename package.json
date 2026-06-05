@@ -26,7 +26,8 @@
     "db:deploy:ci": "prisma migrate deploy",
     "db:studio": "dotenv -e .env.local -- prisma studio",
     "db:push": "dotenv -e .env.local -- prisma db push",
-    "db:seed-admin": "dotenv -e .env.local -- tsx prisma/seed/seed-super-admin.ts"
+    "db:seed-admin": "dotenv -e .env.local -- tsx prisma/seed/seed-super-admin.ts",
+    "repair:flight-totals": "dotenv -e .env.local -- tsx scripts/repair-flight-booking-totals.ts"
   },
   "dependencies": {
     "@duffel/components": "^3.16.1",
@@ -51,6 +52,8 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.6",
+    "@stripe/react-stripe-js": "^6.5.0",
+    "@stripe/stripe-js": "^9.5.0",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.100.0",
     "@tailwindcss/postcss": "^4.0.0",
@@ -95,6 +98,7 @@
     "server-only": "^0.0.1",
     "sharp": "^0.34.5",
     "standardwebhooks": "^1.0.0",
+    "stripe": "^22.2.0",
     "swiper": "^12.0.3",
     "swr": "^2.4.1",
     "tailwind-merge": "^3.5.0",
@@ -124,5 +128,9 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.1"
+  },
+  "overrides": {
+    "@stripe/react-stripe-js": "^6.5.0",
+    "@stripe/stripe-js": "^9.5.0"
   }
 }

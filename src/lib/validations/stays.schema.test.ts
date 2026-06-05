@@ -37,10 +37,10 @@ describe("staysQuoteBodySchema", () => {
 });
 
 describe("staysBookingBodySchema", () => {
-  it("requires E.164 phone", () => {
+  it("requires E.164 phone and checkout_payment_id", () => {
     const base = {
       quote_id: "quo_0000AS0NZdKjjnnHZmSUbI",
-      payment: { three_d_secure_session_id: "tds_test" },
+      checkout_payment_id: "clh3abc123456789012345678",
       email: "a@b.com",
       guests: [{ given_name: "A", family_name: "B", born_on: "1990-01-01" }],
     };
@@ -55,5 +55,31 @@ describe("staysBookingBodySchema", () => {
       phone_number: "+442080160509",
     });
     expect(good.success).toBe(true);
+  });
+
+  it("accepts multiple guests and optional loyalty", () => {
+    const r = staysBookingBodySchema.safeParse({
+      quote_id: "quo_0000AS0NZdKjjnnHZmSUbI",
+      checkout_payment_id: "clh3abc123456789012345678",
+      email: "lead@example.com",
+      phone_number: "+442080160509",
+      guests: [
+        { given_name: "Amelia", family_name: "Earhart", born_on: "1987-07-24" },
+        { given_name: "Fred", family_name: "Noonan" },
+      ],
+      loyalty_programme_account_number: "201154908",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects lead guest under 18", () => {
+    const r = staysBookingBodySchema.safeParse({
+      quote_id: "quo_0000AS0NZdKjjnnHZmSUbI",
+      checkout_payment_id: "clh3abc123456789012345678",
+      email: "a@b.com",
+      phone_number: "+442080160509",
+      guests: [{ given_name: "Minor", family_name: "Guest", born_on: "2015-01-01" }],
+    });
+    expect(r.success).toBe(false);
   });
 });

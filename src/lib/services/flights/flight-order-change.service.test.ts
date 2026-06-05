@@ -84,6 +84,7 @@ import { captureDuffelPaymentForInstantBooking } from "@/lib/services/flights/fl
 import {
   confirmOrderChangeForBooking,
   createOrderChangePaymentIntentForBooking,
+  reconcileFlightBookingTotalFromConfirmedChange,
 } from "@/lib/services/flights/flight-order-change.service";
 
 const bookingRow = {
@@ -299,6 +300,99 @@ describe("confirmOrderChangeForBooking", () => {
       amount: "50.00",
       currency: "USD",
     });
+  });
+});
+
+describe("reconcileFlightBookingTotalFromConfirmedChange", () => {
+  const reconcileBookingRow = {
+    id: "bk_reconcile",
+    user_id: "u1",
+    status: "confirmed",
+    type: "flight",
+    currency: "USD",
+    total_amount: { toString: () => "507.60" },
+    booking_ref_no: "TTU-R",
+    flightBooking: {
+      id: "fb_reconcile",
+      duffel_order_id: "ord_reconcile",
+      order_raw: { data: { id: "ord_reconcile", total_amount: "507.60", total_currency: "USD" } },
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(bookingRepository.findById).mockResolvedValue(reconcileBookingRow as never);
+    vi.mocked(prisma.flightOrderChange.findFirst).mockResolvedValue({
+      id: "loc_reconcile",
+      status: "confirmed",
+      raw: { change_amount: "125.00", change_currency: "USD" },
+      change_amount: "125.00",
+      change_currency: "USD",
+    } as never);
+    vi.mocked(getDuffelOrder).mockResolvedValue({
+      data: {
+        id: "ord_reconcile",
+        total_amount: "382.60",
+        total_currency: "USD",
+      },
+    });
+    vi.mocked(prisma.flightBooking.update).mockResolvedValue({} as never);
+    vi.mocked(prisma.booking.update).mockResolvedValue({} as never);
+  });
+
+  it("uses Duffel order total instead of adding change_amount to current total", async () => {
+    await reconcileFlightBookingTotalFromConfirmedChange("bk_reconcile");
+
+    expect(prisma.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "bk_reconcile" },
+        data: expect.objectContaining({
+          total_amount: expect.anything(),
+          currency: "USD",
+        }),
+      }),
+    );
+    const bookingUpdate = vi.mocked(prisma.booking.update).mock.calls.at(-1)?.[0];
+    expect(Number.parseFloat(String(bookingUpdate?.data?.total_amount))).toBe(382.6);
+    expect(Number.parseFloat(String(bookingUpdate?.data?.total_amount))).not.toBe(632.6);
+  });
+
+  it("does not update booking again when reconcile runs twice with the same authoritative total", async () => {
+    await reconcileFlightBookingTotalFromConfirmedChange("bk_reconcile");
+    const firstUpdateCount = vi.mocked(prisma.booking.update).mock.calls.length;
+
+    vi.mocked(bookingRepository.findById).mockResolvedValue({
+      ...reconcileBookingRow,
+      total_amount: { toString: () => "382.60" },
+      flightBooking: {
+        ...reconcileBookingRow.flightBooking,
+        order_raw: {
+          data: {
+            id: "ord_reconcile",
+            total_amount: "382.60",
+            total_currency: "USD",
+          },
+        },
+      },
+    } as never);
+
+    await reconcileFlightBookingTotalFromConfirmedChange("bk_reconcile");
+    expect(vi.mocked(prisma.booking.update).mock.calls.length).toBe(firstUpdateCount);
+  });
+
+  it("skips update when Duffel and offer lookup both fail", async () => {
+    vi.mocked(getDuffelOrder).mockRejectedValue(new Error("upstream"));
+    vi.mocked(prisma.flightOrderChange.findFirst).mockResolvedValue({
+      id: "loc_reconcile",
+      status: "confirmed",
+      raw: {},
+      change_amount: "125.00",
+      change_currency: "USD",
+    } as never);
+
+    await reconcileFlightBookingTotalFromConfirmedChange("bk_reconcile");
+
+    expect(prisma.booking.update).not.toHaveBeenCalled();
   });
 });
 

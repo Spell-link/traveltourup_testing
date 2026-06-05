@@ -14,7 +14,6 @@ const ALLOWED_INNER_PREFIXES = [
   "/flights",
   "/hotels",
   "/cars",
-  "/wishlists",
   "/blog",
   "/payment",
   "/contact",

@@ -238,7 +238,7 @@ function CarsTab() {
   return (
     <div className="max-w-7xl mx-auto">
       {/* Main Grid Layout - Adjusted widths */}
-      <div className="flex flex-col md:flex-row gap-3 sm:gap-4 pb-4  rounded-lg">
+      <div className="flex flex-col md:flex-row gap-2 pb-4  rounded-lg">
         {/* From Airport - Takes more width - UPDATED LIKE FLIGHTSTAB */}
         <div className="flex-1 min-w-0 relative" ref={fromDropdownRef}>
           <div className="relative">

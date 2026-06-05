@@ -34,6 +34,7 @@ export interface FeaturedHotelsProps {
   bgColor?: string;
   /** When true, the slider shows placeholder tiles (same layout as flight featured skeleton). */
   loading?: boolean;
+  mainPading?: string;
 }
 
 function HotelCardSkeletonTile() {
@@ -71,6 +72,7 @@ const FeaturedHotels = ({
   featuredAd = {},
   bgColor = "bg-muted",
   loading = false,
+  mainPading = "py-10",
 }: FeaturedHotelsProps) => {
   const t = useTranslations("Featured");
   const tCommon = useTranslations("Common");
@@ -110,7 +112,7 @@ const FeaturedHotels = ({
   }
 
   return (
-    <section className={`py-8 md:py-10   ${bgColor}`}>
+    <section className={`${bgColor} ${mainPading}`}>
       <div className="container mx-auto  px-4 md:px-10">
         {/* Section Header */}
         <SectionHeading title={t("hotelsHeading")} subtitle={t("hotelsSubtitle")} />

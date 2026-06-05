@@ -13,6 +13,7 @@ import {
   validateAndPriceOrderServices,
 } from "@/lib/services/flights/flight-ancillaries.service";
 import { resolveFlightPricingConfigForOffer } from "@/lib/services/flights/flight-pricing-rule.service";
+import { trackJourneyEvent } from "@/lib/services/journey/customer-journey.service";
 import type { FlightOrderServiceLine } from "@/lib/validations/flight-ancillaries.schema";
 import type { FlightPaymentsResolvedConfig } from "@/config/flight-payments.config";
 import type { DuffelIntentPriceBreakdown } from "@/lib/payments/duffel-intent-pricing";
@@ -67,6 +68,7 @@ export async function createFlightCheckoutPaymentIntent(input: {
   offerId: string;
   idempotencyKey: string | null;
   services: FlightOrderServiceLine[];
+  userId?: string | null;
 }) {
   const selectionKey = encodeAncillarySelection(input.services);
 
@@ -166,6 +168,28 @@ export async function createFlightCheckoutPaymentIntent(input: {
     });
   } catch {
     // best-effort audit log
+  }
+
+  if (input.userId) {
+    const slice = offer.slices[0];
+    const seg = slice?.segments[0];
+    trackJourneyEvent({
+      userId: input.userId,
+      eventType: "payment.prepared",
+      productType: "flight",
+      productRef: offer.id,
+      stage: "payment_prepared",
+      properties: {
+        payment_intent_id: pit.id,
+        offer_total: breakdown.offer_total,
+      },
+      title: seg?.marketing_carrier_name
+        ? `${seg.marketing_carrier_name} ${seg.flight_number ?? ""}`.trim()
+        : null,
+      subtitle: slice ? `${slice.origin_iata} → ${slice.destination_iata}` : null,
+      priceAmount: breakdown.charge_amount,
+      priceCurrency: breakdown.charge_currency,
+    });
   }
 
   return {

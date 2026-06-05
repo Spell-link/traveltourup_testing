@@ -3,7 +3,7 @@
  *
  * Prisma ORM 7: seed is not auto-run after migrate — use `npm run db:seed` explicitly.
  * Re-run seed after adding permissions to PERMISSION_REGISTRY so `role_permissions` for
- * `admin` / `super_admin` includes new catalog entries (e.g. admin.wishlists:read).
+ * `admin` / `super_admin` includes new catalog entries (e.g. admin.journey:read).
  *
  * @see https://www.prisma.io/docs/orm/prisma-migrate/workflows/seeding
  */

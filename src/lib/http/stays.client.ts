@@ -4,7 +4,13 @@ import { apiJson } from "@/lib/http/api-client";
 import type { HotelLocationSuggestionDto } from "@/lib/api/stays-places.dto";
 import type { StaysSearchResultCard } from "@/lib/api/stays-dto";
 import type { StaysRatesPayload, StaysQuoteDto } from "@/lib/api/stays-dto";
-import type { StaysSearchBodyInput, StaysBookingBodyInput } from "@/lib/validations/stays.schema";
+import type {
+  StaysSearchBodyInput,
+  StaysBookingBodyInput,
+  StaysCheckoutPrepareBodyInput,
+  StaysCheckoutPrepareResponse,
+} from "@/lib/validations/stays.schema";
+import { staysCheckoutPrepareResponseSchema } from "@/lib/validations/stays.schema";
 
 export const STAYS_V1_BASE = "/api/v1/stays";
 
@@ -56,11 +62,80 @@ export async function postStaysQuote(body: { rate_id: string }): Promise<StaysQu
   return apiJson<StaysQuoteDto>(`${STAYS_V1_BASE}/quotes`, { method: "POST", body });
 }
 
+/** Always request a new Duffel quote for the same rate (rates expire in minutes). */
+export async function refreshStaysQuoteForCheckout(rateId: string): Promise<StaysQuoteDto> {
+  return postStaysQuote({ rate_id: rateId });
+}
+
 /** Serialized booking from `serializeBookingResponse` (includes top-level `id`). */
 export type StaysBookingApiResult = Record<string, unknown> & {
   id?: string;
   booking_ref_no?: string;
 };
+
+export async function postStaysCheckoutPrepare(
+  body: StaysCheckoutPrepareBodyInput,
+  idempotencyKey?: string,
+): Promise<StaysCheckoutPrepareResponse> {
+  const headers: Record<string, string> = {};
+  if (idempotencyKey?.trim()) {
+    headers["Idempotency-Key"] = idempotencyKey.trim();
+  }
+  const raw = await apiJson<unknown>(`${STAYS_V1_BASE}/checkout/prepare`, {
+    method: "POST",
+    body,
+    headers,
+  });
+  const parsed = staysCheckoutPrepareResponseSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error("Invalid checkout prepare response.");
+  }
+  return parsed.data;
+}
+
+export async function postStaysBookingCancel(
+  bookingId: string,
+): Promise<StaysBookingApiResult> {
+  return apiJson<StaysBookingApiResult>(
+    `${STAYS_V1_BASE}/bookings/${encodeURIComponent(bookingId)}/cancel`,
+    { method: "POST", body: { action: "confirm" } },
+  );
+}
+
+export type StaysCancelPreviewDto = {
+  booking_id: string;
+  booking_ref_no: string;
+  hotel_confirmation: string | null;
+  status: string;
+  refundAmount: string | null;
+  refundCurrency: string | null;
+  policySummary: string;
+  nonRefundable: boolean;
+  isEstimate: true;
+  cancellation_timeline: Array<{
+    before: string;
+    refund_amount: string;
+    currency?: string | null;
+  }>;
+};
+
+export async function getStaysBookingCancelPreview(
+  bookingId: string,
+): Promise<StaysCancelPreviewDto> {
+  return apiJson<StaysCancelPreviewDto>(
+    `${STAYS_V1_BASE}/bookings/${encodeURIComponent(bookingId)}/cancel/preview`,
+    { method: "GET" },
+  );
+}
+
+export async function postStaysBookingRefundRetry(
+  bookingId: string,
+): Promise<StaysBookingApiResult> {
+  return apiJson<StaysBookingApiResult>(
+    `${STAYS_V1_BASE}/bookings/${encodeURIComponent(bookingId)}/cancel/refund-retry`,
+    { method: "POST", body: {} },
+  );
+}
 
 export async function postStaysBooking(
   body: StaysBookingBodyInput,

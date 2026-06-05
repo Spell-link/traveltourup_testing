@@ -53,6 +53,7 @@ const AMENITY_ICONS: Record<string, { icon: React.ReactNode; label: string }> = 
 };
 
 import { AvailableRooms } from "./AvailableRooms";
+import { HOTEL_AVAILABLE_ROOMS_SECTION_ID } from "@/lib/hotels/scroll-to-available-rooms";
 
 /** Countdown before redirect to the hotels listing (30 minutes). */
 const HOTEL_DETAIL_REDIRECT_SECONDS = 30 * 60;
@@ -212,7 +213,10 @@ export function HotelDetailContent({
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <div>
+        <div className="flex flex-row justify-between items-center">
+        <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
+          {hotel.name}
+        </h1>
           <p
             className={`mb-4 rounded-lg border px-4 py-2 text-sm text-foreground tabular-nums ${countdownBannerBorder} ${countdownBannerBg}`}
           >
@@ -221,9 +225,7 @@ export function HotelDetailContent({
             })}
           </p>
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
-          {hotel.name}
-        </h1>
+       
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-muted-foreground">
             {hotel.area} • {hotel.propertyType}
@@ -266,7 +268,11 @@ export function HotelDetailContent({
       </div>
 
       {/* Available Rooms */}
-      <div className="pt-8 border-t border-border">
+      <section
+        id={HOTEL_AVAILABLE_ROOMS_SECTION_ID}
+        className="scroll-mt-24 pt-8 border-t border-border"
+        aria-labelledby="hotel-available-rooms-heading"
+      >
         <AvailableRooms
           rooms={hotel.rooms ?? getDefaultRooms(hotel)}
           currency={hotel.currency}
@@ -278,7 +284,7 @@ export function HotelDetailContent({
           locationLabel={hotel.area || hotel.address}
           hotelGuestRating={hotel.guestRating ?? hotel.rating}
         />
-      </div>
+      </section>
 
       {/* Amenities / Features */}
       <DetailFeaturesGrid

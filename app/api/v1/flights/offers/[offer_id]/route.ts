@@ -36,6 +36,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     }
 
     const offer = await refreshFlightOffer(offerId);
+ 
     return successResponse({ offer });
   } catch (e) {
     return handleApiError(e);

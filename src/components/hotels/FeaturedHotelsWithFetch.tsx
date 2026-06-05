@@ -9,6 +9,7 @@ export interface FeaturedHotelsWithFetchProps {
   fallbackHotels: FeaturedHotel[];
   featuredAd?: { image?: string | { src: string } };
   bgColor?: string;
+  mainPading?: string;
 }
 /**
  * Loads cached featured Stays via shared SWR (`GET /api/v1/stays/featured`); falls back to `fallbackHotels`.
@@ -17,6 +18,7 @@ export default function FeaturedHotelsWithFetch({
   fallbackHotels,
   featuredAd,
   bgColor = "bg-muted",
+  mainPading = "py-10",
 }: FeaturedHotelsWithFetchProps) {
   const { data, error, isLoading } = useFeaturedStaysQuery();
 console.log("this is featured hotels with fetch", data, error, isLoading);
@@ -32,5 +34,5 @@ console.log("this is featured hotels with fetch", data, error, isLoading);
   }
 
   const display = hotelsFromApi.length > 0 ? hotelsFromApi : fallbackHotels;
-  return <FeaturedHotels hotels={display} featuredAd={featuredAd} bgColor={bgColor} />;
+  return <FeaturedHotels hotels={display} featuredAd={featuredAd} bgColor={bgColor} mainPading={mainPading} />;
 }

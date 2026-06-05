@@ -89,7 +89,7 @@ export function FlightWindowSeatPicker({
     <div className={compact ? "space-y-3" : "space-y-4"}>
       <div>
         <div className="flex items-start gap-2">
-          <Square className="mt-0.5 h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" aria-hidden />
+         
           <div>
             <h3 className={`font-semibold text-foreground ${compact ? "text-sm" : "text-base"}`}>
               {t("seatWindowTitle")}

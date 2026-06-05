@@ -11,8 +11,7 @@ This document explains how the **TravelTourUp** codebase is structured, why key 
 TravelTourUp is a **travel booking and content platform** that lets users:
 
 - Search and book **flights**, **hotels (stays)**, and **cars**, with payments orchestrated through **Duffel** (flights/stays) and app-specific booking records in PostgreSQL.
-- Maintain a **wishlist** of catalog references (flight offer IDs, hotel/car route IDs, etc.) stored per user in the database.
-- Manage **profile**, **bookings**, and (for staff) an **admin panel** for users, roles, permissions, blogs, catalog entities, and cross-user wishlist inspection.
+- Manage **profile**, **bookings**, and (for staff) an **admin panel** for users, roles, permissions, blogs, and catalog entities.
 
 Marketing surfaces include **home**, **about**, **blog**, **FAQs**, **contact**, **terms**, and **privacy**.
 
@@ -53,7 +52,6 @@ traveltourup_next/
 │   ├── (marketing)/             # Public marketing + profile
 │   ├── api/v1/                  # Versioned REST API
 │   ├── auth/                    # OAuth callback, password update
-│   ├── wishlists/               # Shortcut → profile wishlist tab
 │   ├── layout.tsx               # Root layout (fonts, providers)
 │   ├── globals.css              # Design tokens + Tailwind
 │   ├── error.tsx, not-found.tsx, loading.tsx, robots.ts, sitemap.ts
@@ -91,8 +89,8 @@ traveltourup_next/
 #### `src/components/`
 
 - **`ui/`**, **`admin_ui/ui/`**: Reusable primitives (buttons, inputs, tables) aligned with Tailwind + Radix.
-- **Domain folders** (`flights/`, `hotels/`, `cars/`, `blog/`, `bookings/`, `wishlist/`): feature UI.
-- **`admin/`**: Admin-specific screens (users, roles, blogs, wishlists).
+- **Domain folders** (`flights/`, `hotels/`, `cars/`, `blog/`, `bookings/`): feature UI.
+- **`admin/`**: Admin-specific screens (users, roles, blogs).
 - **`shared/`**: Navbar, footer, breadcrumbs, layouts used across marketing/booking.
 - **`providers/`**: Client providers (e.g. `AuthProvider`).
 
@@ -105,7 +103,7 @@ Central **non-UI** logic:
 - **`supabase/`**: Browser client, server client, proxy/session helper.
 - **`authz/`**: RBAC resolution, guards, profile bootstrap.
 - **`api/`**: Route wrappers (`withAuthedRoute`, `withPermissionRoute`), error handling, controllers.
-- **`services/`**: Use-case layer (wishlist, user, stays, flights, blog, admin).
+- **`services/`**: Use-case layer (user, stays, flights, blog, admin).
 - **`db/repositories/`**: Persistence helpers where used.
 - **`duffel/`**, **`stays/`**, **`flights/`**, **`payments/`**: Integration and orchestration.
 - **`validations/`**: Zod schemas shared by API and forms.
@@ -148,7 +146,6 @@ There is **no Redux/Zustand/Jotai** in this codebase. Global client state is ess
 |------|------------|
 | `/profile`, `/profile/bookings`, `/profile/bookings/[id]` | Requires login (page-level `redirect` + optional middleware/proxy) |
 | `/admin/**` | Login + **admin panel role** (see §6) |
-| `/wishlists` | Redirects to `/profile?tab=wishlist` or login |
 
 ### Layout structure
 
@@ -192,7 +189,7 @@ app/layout.tsx          # Root: ThemeProvider, AuthProvider, PageLoader, fonts
 ### Composition and data flow
 
 - **Server Components** fetch data (Prisma, Supabase user, etc.) and pass **serializable props** to client components.
-- **Client Components** (`"use client"`) handle interactivity: filters, tables, wishlist toggles, checkout flows.
+- **Client Components** (`"use client"`) handle interactivity: filters, tables, checkout flows.
 - **Props flow down**; **events and router.refresh()** bubble state changes back to the server-rendered tree where appropriate.
 
 **Example — admin users:** `app/(admin)/admin/users/page.tsx` loads rows server-side; `UserList` receives `rows`, `total`, `query` and updates the URL when filters change, triggering a new server render.
@@ -214,7 +211,7 @@ app/layout.tsx          # Root: ThemeProvider, AuthProvider, PageLoader, fonts
 
 - **Global (client):** authenticated Supabase `user` / `session`, theme mode.
 - **Local:** almost all booking search UI state, modals, table selection.
-- **Server-authoritative:** bookings, wishlist persistence, RBAC — always reconciled via API or server components.
+- **Server-authoritative:** bookings, RBAC — always reconciled via API or server components.
 
 ### Data flow (mental model)
 
@@ -300,7 +297,6 @@ Browser → cookie/Bearer → getServerAuthz() → Prisma / Duffel
 ### Core entities (conceptual)
 
 - **RBAC:** `Role`, `Permission`, join tables, optional `UserPermissionGrant`.
-- **Wishlist:** `WishlistItem` — `(user_id, type, ref_id)` unique.
 - **Bookings:** `Booking` + type-specific **`FlightBooking`**, **`HotelBooking`**, **`CarBooking`** with Duffel references and JSON payloads.
 - **Flights:** `FlightSearchSession`, `FlightPaymentIntentRecord`, `DuffelWebhookEvent`, ancillaries, cancellations.
 - **Content:** `BlogPost`, `BlogCategory`, `BlogPostImage`; **admin catalog:** `AdminHotel`, `AdminCar`.
@@ -344,16 +340,9 @@ Browser → cookie/Bearer → getServerAuthz() → Prisma / Duffel
 - **API tokens:** JSON login/refresh handlers for Bearer usage.
 - **Profile bootstrap:** `ensureUserProfileForAuthUser` + default customer role assignment where applicable (`src/lib/authz/profile.ts`).
 
-### Wishlist
-
-- **DB:** `WishlistItem` rows keyed by user + type + `ref_id`.
-- **API:** `GET/POST/DELETE /api/v1/wishlist` (`app/api/v1/wishlist/route.ts`) → `wishlist.service.ts`.
-- **UI:** `WishlistToggle` uses `useAuth`, then `listMyWishlist` / add / remove via **`wishlist.client.ts`**.
-- **Shortcut:** `/wishlists` redirects to profile tab or login (`app/wishlists/page.tsx`).
-
 ### Cart
 
-There is **no classic shopping-cart model** (no `Cart` table or session cart). Users proceed **directly to vertical-specific checkout** (flights/hotels/cars). “Intent to buy” for discovery is represented by **wishlist** and **booking** records.
+There is **no classic shopping-cart model** (no `Cart` table or session cart). Users proceed **directly to vertical-specific checkout** (flights/hotels/cars). “Intent to buy” for discovery is represented by **booking** records.
 
 ### Payments
 
@@ -461,26 +450,21 @@ Use **`.env.local`** locally; **Vercel** (or similar) project settings for produ
 
 ## 15. Full App Flow (End-to-End)
 
-### Example: Browse → wishlist → book flight
+### Example: Browse → book flight
 
 ```
 1. User opens `/flights`
    → Marketing/booking layout renders Navbar.
    → Client/server load search UI; may call POST /api/v1/flights/search (and related) with Duffel.
 
-2. User saves an offer
-   → WishlistToggle checks useAuth().
-   → If logged in: POST /api/v1/wishlist with type + ref_id.
-   → Prisma upserts WishlistItem.
-
-3. User proceeds to checkout
+2. User proceeds to checkout
    → Payment intent created via POST /api/v1/flights/payment-intents (auth + rate limit + Duffel).
    → FlightPaymentIntentRecord links offer, amounts, client_token.
 
-4. Confirm / book
+3. Confirm / book
    → Confirm route + Duffel order creation; Booking + FlightBooking rows persisted; webhook may update state.
 
-5. View booking
+4. View booking
    → /profile/bookings loads from Prisma via server components or /api/v1/bookings.
 ```
 

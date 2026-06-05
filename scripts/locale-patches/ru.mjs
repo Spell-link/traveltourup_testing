@@ -16,7 +16,6 @@ export default function patchRU(d) {
     account: "Аккаунт",
     profile: "Профиль",
     bookings: "Бронирования",
-    wishlists: "Списки желаний",
     adminConsole: "Админ-панель",
     logout: "Выйти",
     login: "Войти",

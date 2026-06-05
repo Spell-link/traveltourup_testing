@@ -7,6 +7,7 @@ import { OfferUnavailableError } from "@/lib/api/errors";
 export async function refreshFlightOffer(offerId: string): Promise<FlightOfferDTO> {
   try {
     const raw = await getOffer(offerId, { return_available_services: true });
+
     return mapDuffelOfferToDto(raw);
   } catch (e) {
     if (e instanceof DuffelApiError && (e.status === 404 || e.status === 410)) {

@@ -19,15 +19,25 @@ export function sampleDataForEmail(type: EmailType, subType: EmailBookingSubType
             : subType === EmailBookingSubType.car
               ? "LAX"
               : "LHR → JFK",
-        dates: "Departure: Mon, May 18, 2026, 10:00 AM\nReturn: Mon, May 25, 2026, 3:00 PM",
+        dates:
+          subType === EmailBookingSubType.hotel
+            ? "Check-in: Mon, May 18, 2026\nCheck-out: Wed, May 20, 2026"
+            : "Departure: Mon, May 18, 2026, 10:00 AM\nReturn: Mon, May 25, 2026, 3:00 PM",
         total: "USD 406.82",
         manageUrl: "https://traveltourup.com/profile/bookings/sample-booking-id",
-        airlineRecordLocator: subType === EmailBookingSubType.flight ? "X9ABC1" : undefined,
+        airlineRecordLocator:
+          subType === EmailBookingSubType.flight
+            ? "X9ABC1"
+            : subType === EmailBookingSubType.hotel
+              ? "HTL-88421"
+              : undefined,
         passengersSummary: "Test Traveler",
         statusNote:
           subType === EmailBookingSubType.flight
             ? "Your payment was received. Your itinerary and booking references below match what you booked."
-            : undefined,
+            : subType === EmailBookingSubType.hotel
+              ? "Your payment was received and your stay is confirmed. Present hotel confirmation HTL-88421 at check-in along with photo ID."
+              : undefined,
       };
     case EmailType.paymentConfirmation:
       return {

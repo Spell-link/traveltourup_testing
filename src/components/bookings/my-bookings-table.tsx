@@ -410,7 +410,7 @@ export function MyBookingsTable({
     />
   ) : null;
 
-  const title = standalone ? "My bookings" : "My orders";
+  const title = standalone ? "My bookings" : "My Bookings";
   const subtitle = standalone
     ? "Flights, hotels, and car rentals in one place."
     : "View and open your trip confirmations.";

@@ -7,7 +7,6 @@ import { FlightDetailContent } from "@/components/flights/FlightDetailContent";
 import { FlightOfferExpiryCountdown } from "@/components/flights/FlightOfferExpiryCountdown";
 import { FlightChangeBreadcrumb } from "@/components/flights/FlightChangeBreadcrumb";
 import { FlightOrderJourneyTimeline } from "@/components/flights/FlightOrderJourneyTimeline";
-import { WishlistToggle } from "@/components/wishlist/WishlistToggle";
 import { useBookingBreadcrumbFlightLabels } from "@/components/shared/BookingBreadcrumbFlightContext";
 import { buildFlightDetailBreadcrumbLabels } from "@/lib/flights/flight-detail-breadcrumb";
 import {
@@ -82,17 +81,6 @@ export default function FlightDetail({
 
   const mainContent = (
     <div>
-      {!isChange ? (
-        <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-          <WishlistToggle
-            type="flight"
-            refId={flight.id}
-            title={`${flight.departureAirport} → ${flight.arrivalAirport}`}
-            subtitle={`${flight.airline} ${flight.flightNumber} · ${flight.departureDate}`}
-            imageUrl={flight.airlineLogoUrl}
-          />
-        </div>
-      ) : null}
       {flight.expires_at ? (
         <FlightOfferExpiryCountdown expires_at={flight.expires_at} />
       ) : null}

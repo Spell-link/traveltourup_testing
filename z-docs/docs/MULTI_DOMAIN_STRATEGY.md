@@ -2285,6 +2285,24 @@ This enables:
 
 > **Note:** This section is provided for reference in case you still want to use WordPress for content on any domain. The recommended approach does NOT require separate WordPress installations.
 
+### 14.0 Travel search widget (satellite WordPress sites)
+
+Use the self-contained embed file [`z-docs/docs/wordpress/ttu-travel-search-widget-embed.html`](wordpress/ttu-travel-search-widget-embed.html):
+
+1. Paste the entire file into a WordPress **Custom HTML** block or Elementor **HTML** widget.
+2. Default redirect target is `https://traveltourup.com` (`MAIN_SITE` constant at top of script).
+3. On each country WordPress site, set `CORS_ALLOWED_ORIGIN` on the main Next.js app to allow that domain (see `proxy.ts`) so airport/hotel typeahead can call `/api/v1/flights/airports` and `/api/v1/stays/places`.
+4. Regenerate static airport/destination data after app changes: `node scripts/sync-widget-search-data.mjs`.
+
+**Redirect examples (QA):**
+
+- Flights: `https://traveltourup.com/flights?origin=JFK&destination=LHR&departure_date=2026-06-08&trip=one_way&cabin_class=economy&adults=1&children=0&infants=0&supplier_timeout=60000`
+- Hotels: `https://traveltourup.com/hotels?stays_results=1&check_in=2026-06-10&check_out=2026-06-12&rooms=1&adults=2&children=0&dest_kind=popular&dest_code=NYC&dest_name=New%20York%20City&dest_country=United%20States`
+- Cars: `https://traveltourup.com/cars?pickup=JFK&date=2026-06-08&adults=1&children=0`
+- More services: `https://traveltourup.com/`
+
+The main app hydrates hotel searches from URL query params (cross-domain handoff); flights already used URL params.
+
 ### 14.1 If Using WordPress as Headless CMS (Approach 4 Element)
 
 Install **one** WordPress instance that serves as a headless content API:

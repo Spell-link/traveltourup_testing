@@ -13,5 +13,6 @@ export function getOffer(offerId: string, query?: GetOfferQuery) {
   }
   const qs = params.toString();
   const path = `/air/offers/${encodeURIComponent(offerId)}${qs ? `?${qs}` : ""}`;
+
   return duffelFetch<unknown>(path);
 }

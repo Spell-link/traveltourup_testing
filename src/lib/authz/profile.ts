@@ -31,7 +31,9 @@ export async function assignDefaultCustomerRole(userId: string) {
  * If the profile already exists (e.g. created by admin), existing data is
  * preserved — only blank first/last names are back-filled from metadata.
  */
-export async function ensureUserProfileForAuthUser(input: EnsureProfileInput) {
+export async function ensureUserProfileForAuthUser(
+  input: EnsureProfileInput,
+): Promise<{ created: boolean }> {
   const existing = await prisma.user.findUnique({
     where: { id: input.id },
     select: { first_name: true, last_name: true },
@@ -45,21 +47,24 @@ export async function ensureUserProfileForAuthUser(input: EnsureProfileInput) {
         last_name: input.last_name,
       },
     });
-  } else {
-    const updates: Record<string, string> = {};
-    if (!existing.first_name.trim() && input.first_name.trim()) {
-      updates.first_name = input.first_name;
-    }
-    if (!existing.last_name.trim() && input.last_name.trim()) {
-      updates.last_name = input.last_name;
-    }
-    if (Object.keys(updates).length > 0) {
-      await prisma.user.update({
-        where: { id: input.id },
-        data: updates,
-      });
-    }
+    await assignDefaultCustomerRole(input.id);
+    return { created: true };
+  }
+
+  const updates: Record<string, string> = {};
+  if (!existing.first_name.trim() && input.first_name.trim()) {
+    updates.first_name = input.first_name;
+  }
+  if (!existing.last_name.trim() && input.last_name.trim()) {
+    updates.last_name = input.last_name;
+  }
+  if (Object.keys(updates).length > 0) {
+    await prisma.user.update({
+      where: { id: input.id },
+      data: updates,
+    });
   }
 
   await assignDefaultCustomerRole(input.id);
+  return { created: false };
 }

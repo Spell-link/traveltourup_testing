@@ -49,7 +49,7 @@ export default function WelcomeEmail({
               <Text className="mt-2 text-sm leading-6 text-slate-600">
                 • Search flexible fares and compare options in one place.
                 <br />
-                • Save wishlists and pick up where you left off on any device.
+                • Manage bookings and trip details from your profile.
                 <br />
                 • Get booking updates and trip reminders by email.
               </Text>

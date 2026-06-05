@@ -11,6 +11,7 @@ import {
   ProfileDashboard,
   type ProfileDashboardProfile,
 } from "@/components/profile/ProfileDashboard";
+import { ProfileDashboardSkeleton } from "@/components/profile/ProfileDashboardSkeleton";
 
 export async function generateMetadata({
   params,
@@ -65,13 +66,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ locale
 
   return (
     <main>
-      <Suspense
-        fallback={
-          <div className="flex min-h-[420px] items-center justify-center bg-muted/40 py-12 text-muted-foreground">
-            Loading account…
-          </div>
-        }
-      >
+      <Suspense fallback={<ProfileDashboardSkeleton />}>
         <ProfileDashboard email={user?.email ?? null} profile={profile} oauthAvatarUrl={oauthAvatarUrl} />
       </Suspense>
     </main>

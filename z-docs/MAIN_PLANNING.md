@@ -432,7 +432,7 @@ now basically i working on this traveltourup project and in the first three mont
 1. basic duffle integrations inlcuding the flights and stays integrations with complete flow from flight search to booking and payment along with seat selection and extra baggage management
 2. all the other pages including Home with sections, About page, blogs, contact, Privacy Policy,Terms of Service
 3. integrate third party for cars booking(also suggest the most authentic third part for cars for api integration which used by the famous plateform like bookme.pk or other) with complete flow till payment
-4. implement authentication with profile,my booking, my reviews,Wishlists, return and refunds, credit and debits for customers
+4. implement authentication with profile, my booking, my reviews, return and refunds, credit and debits for customers
 5. language and currency support implementation 
 6. implement complete admin panel in which implement all the things in which admin can manage users,customers,authentication and authorization,booking flow(for all three with proper ticket generation and pdf ),payment flow(for all three with proper ticket generation and pdf), return and refunds and some others like blogs crud and credit and debits
 7. implement basic database backup stratages 
@@ -458,4 +458,23 @@ f. mention other module which can be good addition in this project so that we wi
 basically i want the complete and professional module wise timeline where we are in the first phase of three month duration mention above at first and many things are done and under development can seen in this project and we have 2 month left for complete other parts check for those in this code base and than also create the timeline for other modules which we will cover after these three months like mobile app phase and than on other phases one by one with the realistic and professional timeline 
 
 so now create the professional and conpact and concise and short version of module wise timeline according to mention requirements which i will share with manager and i will follow to complete this project in the professional way and which should be easily presentable in the easy way and understand in the easy way in the md format 
+
+
+Hotel payment flow before booking needs impovement
+and firstaly implement to check the current duffel ballance(search from the duffel official docs to check api end point and how to implement and than start according to best practices of duffel and next js) show in admin side so that admin can check in visual way and use the same method/component to check the current ballance in duffel wallet before every hotel booking than choose one of these options for customer payment before booking and after successfull payment proceed to booking
+ these options:
+1) If there is enough ballance in wallet than this one:
+   customer payment --> our stripe only
+   and when payment done than booking done with already existing ballance in duffel wallet ballance 
+2) if not than chose this option:
+     customer payment --> stripe --> duffel topup before booking(so that payment goes and there is enough ballance there in wallet before booking) -- current implementation 
+
+the second option almost completed and working well(it may need improvement according to duffel best practices and if so that also do) while first one is not implement
+
+so firstaly explore each and every things related to current implementation and than 
+ create the solid and professional planning and than start implement in optimized,professional and according to the best practices in step by step and make sure payment is compulsory for booking hotels and cancelation and return and refund should be also working well 
+
+and also make sure to handle this scenerio gracefully and in optimized and professional way if payment done but booking fail(firstally if booking failed than payment also roleback quickly for better user experience if so other wise refund quickly automatically if payment done but booking fail in optimized,professional way and according to the best practices ) and make sure there should be professional best user experience in this points
+
+
 

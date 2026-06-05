@@ -1,20 +1,15 @@
 // @ts-nocheck - Complex hero tab; autocomplete typed incrementally with FlightsTab parity
 "use client";
 import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import type { HotelsPageLayout } from "@/lib/hotels/hotels-page-layout";
 import { readStaysSearchFormSnapshot } from "@/lib/hotels/stays-search-snapshot";
 import { ChevronDown, Calendar, ChevronLeft, ChevronRight, Building2, Search } from "lucide-react";
 import { DESTINATIONS, type HotelDestination } from "@/data/destinations";
 import { coordsForDestinationCode } from "@/data/stay-destination-coords";
-import {
-  postStaysSearch,
-  TTU_STAYS_SEARCH_SESSION_KEY,
-  TTU_STAYS_SEARCH_PENDING_KEY,
-  TTU_STAYS_SEARCH_STARTED_EVENT,
-  TTU_STAYS_SEARCH_UPDATED_EVENT,
-} from "@/lib/http/stays.client";
+import { TTU_STAYS_SEARCH_UPDATED_EVENT } from "@/lib/http/stays.client";
+import { buildStaysSearchQueryParams } from "@/lib/hotels/search-from-url";
 import { COMBO_FIELD_SHELL_CLASS, COMBO_FIELD_SHELL_RESPONSIVE_CLASS } from "@/components/ui/inputFieldStyles";
 import { useDuffelHotelLocationSuggest } from "@/components/hotels/useDuffelHotelLocationSuggest";
 import { Skeleton } from "@/components/admin_ui/ui/skeleton";
@@ -23,6 +18,7 @@ import { getRegionSelectOptions } from "@/lib/region-select-options";
 import { SearchableSelectCombobox } from "@/components/ui/SearchableSelectCombobox";
 import { MobileFullscreenSearchOverlay } from "@/components/shared/mobile/MobileFullscreenSearchOverlay";
 import { useMobileFullscreenInteraction } from "@/hooks/useMobileFullscreenInteraction";
+import { hydrateStaysFormFromUrl } from "@/lib/hotels/hydrate-stays-form-from-url";
 
 const HOTEL_COMBO_TRIGGER = `${COMBO_FIELD_SHELL_CLASS} cursor-pointer flex justify-between items-center font-medium`;
 const HOTEL_COMBO_TRIGGER_SM = `${COMBO_FIELD_SHELL_RESPONSIVE_CLASS} cursor-pointer flex justify-between items-center font-medium`;
@@ -72,6 +68,8 @@ function HotelsTab({
   onStaysSearchStart?: () => void;
 } = {}) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const staysSearchQueryKey = searchParams.toString();
   const locale = useLocale();
   const ht = useTranslations("Hotels.tab");
   const tCommon = useTranslations("Common");
@@ -268,6 +266,22 @@ function HotelsTab({
     applyStaysFormFromSession();
   }, [applyStaysFormFromSession]);
 
+  useLayoutEffect(() => {
+    if (!shouldHydrateFromSession) return;
+    const h = hydrateStaysFormFromUrl(new URLSearchParams(searchParams.toString()));
+    if (!h) return;
+    setCheckInDate(h.checkInDate);
+    setCheckOutDate(h.checkOutDate);
+    setRooms(h.rooms);
+    setAdults(h.adults);
+    setChildren(h.children);
+    setNationality(h.nationality);
+    setSelectedDestination(h.selectedDestination);
+    setCurrentMonth(h.currentMonth);
+    setCurrentYear(h.currentYear);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- URL → form sync
+  }, [staysSearchQueryKey, shouldHydrateFromSession]);
+
   useEffect(() => {
     if (!shouldHydrateFromSession) return;
     const onSessionUpdated = () => applyStaysFormFromSession();
@@ -275,7 +289,7 @@ function HotelsTab({
     return () => window.removeEventListener(TTU_STAYS_SEARCH_UPDATED_EVENT, onSessionUpdated);
   }, [shouldHydrateFromSession, applyStaysFormFromSession]);
 
-  const handleStaysSearch = async () => {
+  const handleStaysSearch = () => {
     if (!selectedDestination) {
       window.alert(ht("alertSelectDestination"));
       return;
@@ -284,83 +298,42 @@ function HotelsTab({
       window.alert(ht("alertSelectDates"));
       return;
     }
-    let coords: { latitude: number; longitude: number; radius: number } | null = null;
-    if (selectedDestination.kind === "popular") {
-      coords = coordsForDestinationCode(selectedDestination.code);
-      if (!coords) {
-        window.alert(ht("alertDestinationUnavailable"));
-        return;
-      }
-    } else {
-      coords = {
-        latitude: selectedDestination.latitude,
-        longitude: selectedDestination.longitude,
-        radius: selectedDestination.radius,
-      };
+    if (selectedDestination.kind === "popular" && !coordsForDestinationCode(selectedDestination.code)) {
+      window.alert(ht("alertDestinationUnavailable"));
+      return;
     }
+
+    const destinationSnapshot =
+      selectedDestination.kind === "popular"
+        ? {
+            kind: "popular" as const,
+            code: selectedDestination.code,
+            name: selectedDestination.name,
+            country: selectedDestination.country,
+          }
+        : {
+            kind: "place" as const,
+            id: selectedDestination.id,
+            name: selectedDestination.name,
+            city_name: selectedDestination.city_name,
+            iata_code: selectedDestination.iata_code,
+            latitude: selectedDestination.latitude,
+            longitude: selectedDestination.longitude,
+            radius: selectedDestination.radius,
+          };
+
+    const params = buildStaysSearchQueryParams({
+      check_in_date: checkInDate,
+      check_out_date: checkOutDate,
+      rooms,
+      adults,
+      children,
+      destination: destinationSnapshot,
+      nationality,
+    });
+
     onStaysSearchStart?.();
-    const guests = [];
-    for (let i = 0; i < adults; i++) guests.push({ type: "adult" });
-    for (let i = 0; i < children; i++) guests.push({ type: "child", age: 8 });
-
-    sessionStorage.setItem(TTU_STAYS_SEARCH_PENDING_KEY, "1");
-    sessionStorage.removeItem(TTU_STAYS_SEARCH_SESSION_KEY);
-    window.dispatchEvent(new Event(TTU_STAYS_SEARCH_STARTED_EVENT));
-    router.push("/hotels?stays_results=1");
-
-    try {
-      const data = await postStaysSearch({
-        check_in_date: checkInDate,
-        check_out_date: checkOutDate,
-        rooms,
-        guests,
-        location: {
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          radius: coords.radius,
-        },
-      });
-      const destinationSnapshot =
-        selectedDestination.kind === "popular"
-          ? {
-              kind: "popular" as const,
-              code: selectedDestination.code,
-              name: selectedDestination.name,
-              country: selectedDestination.country,
-            }
-          : {
-              kind: "place" as const,
-              id: selectedDestination.id,
-              name: selectedDestination.name,
-              city_name: selectedDestination.city_name,
-              iata_code: selectedDestination.iata_code,
-              latitude: selectedDestination.latitude,
-              longitude: selectedDestination.longitude,
-              radius: selectedDestination.radius,
-            };
-      sessionStorage.setItem(
-        TTU_STAYS_SEARCH_SESSION_KEY,
-        JSON.stringify({
-          context: {
-            check_in_date: checkInDate,
-            check_out_date: checkOutDate,
-            rooms,
-            adults,
-            children,
-            destination: destinationSnapshot,
-          },
-          ...data,
-        }),
-      );
-      sessionStorage.removeItem(TTU_STAYS_SEARCH_PENDING_KEY);
-      window.dispatchEvent(new Event(TTU_STAYS_SEARCH_UPDATED_EVENT));
-    } catch (e) {
-      sessionStorage.removeItem(TTU_STAYS_SEARCH_PENDING_KEY);
-      sessionStorage.removeItem(TTU_STAYS_SEARCH_SESSION_KEY);
-      window.dispatchEvent(new Event(TTU_STAYS_SEARCH_UPDATED_EVENT));
-      const msg = e instanceof Error ? e.message : ht("searchFailed");
-      window.alert(msg);
-    }
+    router.push(`/hotels?${params.toString()}`);
   };
 
   const updateRooms = (action) => {
@@ -482,7 +455,7 @@ function HotelsTab({
     const formattedDate = toLocalYmd(selectedDate);
     setDateFunction(formattedDate);
     if (!isCheckOut) {
-      setCheckOutDate((prev) => (prev && prev < formattedDate ? formattedDate : prev));
+      setCheckOutDate((prev) => (prev && prev <= formattedDate ? "" : prev));
     }
     setShowPickerFunction(false);
     closeField();
@@ -521,7 +494,9 @@ function HotelsTab({
     if (isCheckOut && checkInDate) {
       const [y, m, d] = checkInDate.split("-").map(Number);
       const checkInStart = startOfLocalDayFromParts(y, m - 1, d);
-      minSelectable = checkInStart > today ? checkInStart : today;
+      const dayAfterCheckIn = new Date(checkInStart);
+      dayAfterCheckIn.setDate(dayAfterCheckIn.getDate() + 1);
+      minSelectable = dayAfterCheckIn > today ? dayAfterCheckIn : today;
     }
 
     const days = [];
@@ -855,7 +830,7 @@ function HotelsTab({
 
   return (
     <div className="mx-auto max-w-7xl">
-      <div className="grid grid-cols-1 md:grid-cols-13 gap-3 rounded-lg pb-4 sm:gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-13 gap-2 rounded-lg pb-4 ">
         {/* Destination Dropdown - UPDATED LIKE FLIGHTSTAB */}
         <div className={mode ? "col-span-12 md:col-span-5 relative" : "col-span-12 md:col-span-3 relative"} ref={destinationDropdownRef}>
           <div className="relative">
@@ -969,7 +944,7 @@ function HotelsTab({
             type="button"
             className="w-full h-14 sm:h-16 bg-primary hover:bg-primary-600 disabled:opacity-60 text-white rounded-lg flex items-center justify-center transition-colors font-semibold md:aspect-square"
             aria-label={ht("searchHotels")}
-            disabled={!selectedDestination || !checkInDate || !checkOutDate}
+            disabled={!selectedDestination || !checkInDate || !checkOutDate || checkOutDate <= checkInDate}
             onClick={() => void handleStaysSearch()}
           >
             <Search className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2} aria-hidden />

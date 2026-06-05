@@ -6,6 +6,7 @@ import type { AppLocale } from "@/i18n/routing";
 import { safeInternalPath } from "@/lib/auth/redirect";
 import { getServerAuthz } from "@/lib/authz/session";
 import HotelPayment from "@/views/HotelPayment";
+import { trackHotelCheckoutStarted } from "@/lib/services/journey/journey-checkout-instrumentation";
 
 export async function generateMetadata({
   params,
@@ -52,6 +53,8 @@ export default async function Page({
   if (!userId) {
     redirect(`/${locale}/login?next=${encodeURIComponent(returnPath)}`);
   }
+
+  trackHotelCheckoutStarted({ userId, sp });
 
   return <HotelPayment />;
 }

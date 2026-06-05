@@ -12,14 +12,13 @@ import { cn } from "@/lib/utils";
 import { updateMyProfile } from "@/lib/http/user.client";
 import { Input } from "@/components/ui/Input";
 import { MyBookingsList } from "@/components/bookings/MyBookingsList";
-import { WishlistPanel } from "@/components/wishlist/WishlistPanel";
+import { Skeleton } from "@/components/admin_ui/ui/skeleton";
 
 const PROFILE_AVATAR_API = "/api/v1/users/me/avatar";
 const SIDEBAR_ITEMS = [
   "My Profile",
-  "My Orders",
+  "My Bookings",
   // "My Reviews",
-  "Wishlist",
   // "Gift Cards",
 ] as const;
 
@@ -53,14 +52,20 @@ export function ProfileDashboard({
   /** Below md: true = show content pane only; false = sidebar menu only. Ignored from md upward via CSS. */
   const [mobileShowsContent, setMobileShowsContent] = useState(false);
 
+  const profileImageSrc = useMemo(() => {
+    const cacheKey = profile?.updated_at ?? "";
+    if (profile?.avatar_path && cacheKey) {
+      return `${PROFILE_AVATAR_API}?v=${encodeURIComponent(cacheKey)}`;
+    }
+    if (oauthAvatarUrl && oauthAvatarUrl.length > 0) return oauthAvatarUrl;
+    return null;
+  }, [profile?.avatar_path, profile?.updated_at, oauthAvatarUrl]);
+
   useEffect(() => {
     const tab = searchParams.get("tab")?.trim();
     const hl = searchParams.get("highlight")?.trim() ?? "";
-    if (tab === "wishlist") {
-      setActive("Wishlist");
-      setMobileShowsContent(true);
-    } else if (tab === "orders" || hl.length > 0) {
-      setActive("My Orders");
+    if (tab === "orders" || hl.length > 0) {
+      setActive("My Bookings");
       setMobileShowsContent(true);
     }
   }, [searchParams]);
@@ -86,7 +91,7 @@ export function ProfileDashboard({
               <SidebarAvatar
                 displayName={displayNameFrom(profile, email)}
                 profile={profile}
-                oauthAvatarUrl={oauthAvatarUrl}
+                imageSrc={profileImageSrc}
               />
               <div className="flex flex-col px-4 md:px-6 sm:text-center">
 
@@ -159,10 +164,8 @@ export function ProfileDashboard({
                 email={email}
                 profile={profile}
               />
-            ) : active === "My Orders" ? (
+            ) : active === "My Bookings" ? (
               <MyBookingsList highlightRef={highlightOrders} />
-            ) : active === "Wishlist" ? (
-              <WishlistPanel />
             ) : (
               <PlaceholderPanel title={active} />
             )}
@@ -185,11 +188,11 @@ function displayNameFrom(profile: ProfileDashboardProfile | null, email: string 
 function SidebarAvatar({
   displayName,
   profile,
-  oauthAvatarUrl,
+  imageSrc,
 }: {
   displayName: string;
   profile: ProfileDashboardProfile | null;
-  oauthAvatarUrl: string | null;
+  imageSrc: string | null;
 }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -225,12 +228,21 @@ function SidebarAvatar({
     return (a && b ? `${a}${b}` : a ?? "?").toUpperCase();
   }, [displayName]);
 
-  const src =
-    hasAvatar && cacheKey
-      ? `${PROFILE_AVATAR_API}?v=${encodeURIComponent(cacheKey)}`
-      : oauthAvatarUrl && oauthAvatarUrl.length > 0
-        ? oauthAvatarUrl
-        : null;
+  const src = imageSrc;
+
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [imageLoaded, setImageLoaded] = useState(src == null);
+
+  const markImageReady = useCallback(() => {
+    setImageLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    setImageLoaded(src == null);
+    if (src != null && imgRef.current?.complete) {
+      markImageReady();
+    }
+  }, [src, markImageReady]);
 
   const onFileChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -250,14 +262,25 @@ function SidebarAvatar({
       <div className="relative sm:h-24 sm:w-24 h-16 w-16 shrink-0">
         <div className="group relative h-full w-full overflow-hidden rounded-full border-2 border-primary/25 bg-muted text-sm font-semibold text-primary">
           {src ? (
-            <img
-              src={src}
-              alt=""
-              width={80}
-              height={80}
-              className="h-full w-full object-cover"
-              referrerPolicy="no-referrer"
-            />
+            <>
+              {!imageLoaded ? (
+                <Skeleton className="absolute inset-0 rounded-full bg-muted-foreground/25" aria-hidden />
+              ) : null}
+              <img
+                ref={imgRef}
+                src={src}
+                alt=""
+                width={80}
+                height={80}
+                className={cn(
+                  "h-full w-full object-cover transition-opacity duration-200",
+                  imageLoaded ? "opacity-100" : "opacity-0",
+                )}
+                referrerPolicy="no-referrer"
+                onLoad={markImageReady}
+                onError={markImageReady}
+              />
+            </>
           ) : (
             <span className="flex h-full w-full items-center justify-center" aria-hidden>
               {initials}

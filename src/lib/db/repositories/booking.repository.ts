@@ -11,7 +11,11 @@ const bookingInclude = {
       orderCancellations: { orderBy: { created_at: "desc" as const } },
     },
   },
-  hotelBooking: true,
+  hotelBooking: {
+    include: {
+      cancellations: { orderBy: { created_at: "desc" as const }, take: 1 },
+    },
+  },
   carBooking: true,
 } as const;
 
@@ -48,6 +52,9 @@ export const bookingListInclude = {
       booking_reference: true,
       quote_expires_at: true,
       accommodation_snapshot: true,
+      confirmation_pdf_storage_path: true,
+      confirmation_pdf_generated_at: true,
+      confirmation_pdf_generation_failed_at: true,
       created_at: true,
       updated_at: true,
     },

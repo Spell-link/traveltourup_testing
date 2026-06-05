@@ -23,7 +23,7 @@ This document describes the TravelTourUp flight cancellation and refund architec
 
 ### 4. Profile → orders UI
 
-- List: [`MyBookingsList`](src/components/bookings/MyBookingsList.tsx) → `GET /api/v1/bookings` (label “My orders” on dashboard embed).
+- List: [`MyBookingsList`](src/components/bookings/MyBookingsList.tsx) → `GET /api/v1/bookings` (label “My Bookings” on dashboard embed).
 - Detail: [`BookingDetailView`](src/components/bookings/BookingDetailView.tsx) → `GET /api/v1/bookings/:id`, plus **[`FlightBookingCancelPanel`](src/components/bookings/FlightBookingCancelPanel.tsx)** for quote → confirm, refund retry, and refresh while `refund_processing`.
 
 ### 5. API routes

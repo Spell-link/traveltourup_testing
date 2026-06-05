@@ -4,7 +4,7 @@
  */
 
 /** Bump when PDF layout changes — invalidates cached `itinerary-v{N}.pdf` paths. */
-export const FLIGHT_ITINERARY_PDF_LAYOUT_VERSION = 5;
+export const FLIGHT_ITINERARY_PDF_LAYOUT_VERSION = 8;
 
 export function flightItineraryPdfStorageSuffix(): string {
   return `itinerary-v${FLIGHT_ITINERARY_PDF_LAYOUT_VERSION}.pdf`;

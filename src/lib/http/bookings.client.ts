@@ -63,3 +63,46 @@ export async function downloadBookingItineraryPdf(
     URL.revokeObjectURL(objectUrl);
   }
 }
+
+export async function postBookingVoucherRegenerate(bookingId: string): Promise<{ ok: boolean }> {
+  return apiJson<{ ok: boolean }>(
+    `${BOOKINGS_V1_BASE}/${encodeURIComponent(bookingId)}/voucher`,
+    { method: "POST", body: {} },
+  );
+}
+
+/** Fetches hotel confirmation PDF and triggers a browser download. */
+export async function downloadBookingVoucherPdf(
+  bookingId: string,
+  filename: string,
+): Promise<void> {
+  const res = await fetch(`${BOOKINGS_V1_BASE}/${encodeURIComponent(bookingId)}/voucher`, {
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let message = "Could not download confirmation";
+    try {
+      const parsed = JSON.parse(text) as { message?: string };
+      if (parsed.message) message = parsed.message;
+    } catch {
+      if (text.trim()) message = text.trim();
+    }
+    throw new ApiRequestError(message, res.status, {});
+  }
+
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}

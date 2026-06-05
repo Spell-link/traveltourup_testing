@@ -10,7 +10,11 @@ import { resolveFareOptionsFromSession } from "@/lib/flights/flight-search-offer
 import { FlightItineraryDetailBody } from "@/components/flights/FlightItineraryDetailBody";
 import { useTranslations, useLocale } from "next-intl";
 import { useCurrency } from "@/components/providers/CurrencyProvider";
-import { offerItineraryFingerprint } from "@/lib/flights/list-display";
+import {
+  flightOfferToListDisplayForSlice,
+  offerItineraryFingerprint,
+} from "@/lib/flights/list-display";
+import { getFlightOfferTripType } from "@/lib/flights/flight-offer-trip-type";
 
 function fareLabelFromOffer(o: FlightOfferDTO): string {
   const brands = o.slices
@@ -26,12 +30,36 @@ export interface FlightDetailContentProps {
   offer: FlightOfferDTO;
 }
 
-export function FlightDetailContent({ flight, offer }: FlightDetailContentProps) {
+function journeyLabelForSlice(
+  tripType: ReturnType<typeof getFlightOfferTripType>,
+  sliceIndex: number,
+  offer: FlightOfferDTO,
+  tResults: (key: "outbound" | "returnStep") => string,
+  tDetail: (key: "journeySliceLabel", values: { index: number; origin: string; destination: string }) => string,
+): string | undefined {
+  if (tripType === "single") return undefined;
+  if (tripType === "round_trip") {
+    return sliceIndex === 0 ? tResults("outbound") : tResults("returnStep");
+  }
+  const slice = offer.slices[sliceIndex];
+  if (!slice) return undefined;
+  return tDetail("journeySliceLabel", {
+    index: sliceIndex + 1,
+    origin: slice.origin_iata,
+    destination: slice.destination_iata,
+  });
+}
+
+export function FlightDetailContent({ flight: _flight, offer }: FlightDetailContentProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionFromUrl = searchParams.get("search_session")?.trim() || null;
   const locale = useLocale();
   const { formatPrice } = useCurrency();
+  const tResults = useTranslations("Flights.results");
+  const tDetail = useTranslations("Flights.detail");
+  const tripType = getFlightOfferTripType(offer.slices.length);
+  const showOfferTotalSeparately = tripType !== "single";
 
   const [fareOptions, setFareOptions] = useState<FlightOfferDTO[]>([offer]);
 
@@ -117,7 +145,22 @@ export function FlightDetailContent({ flight, offer }: FlightDetailContentProps)
         </section>
       ) : null}
 
-      <FlightItineraryDetailBody flight={flight} />
+      {offer.slices.map((sl, sliceIndex) => {
+        const sliceFlight = flightOfferToListDisplayForSlice(offer, sliceIndex);
+        const journeyLabel = journeyLabelForSlice(tripType, sliceIndex, offer, tResults, tDetail);
+        console.log("hyugygyt212", offer);
+        return (
+          <section key={sl.id ?? sliceIndex}>
+            <FlightItineraryDetailBody
+              flight={sliceFlight}
+              journeyLabel={journeyLabel}
+              showOfferSections={!showOfferTotalSeparately}
+            />
+          </section>
+        );
+      })}
+
+  
     </div>
   );
 }

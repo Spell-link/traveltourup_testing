@@ -93,7 +93,7 @@ export function FlightCheckoutPassengerCard({
       <div>
         <h4 className="mb-3 text-sm font-semibold text-muted-foreground">{labels.personalDetailsTitle}</h4>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
-          <div className="sm:col-span-2">
+          <div className="min-w-0 sm:col-span-2">
             <NativeSelect
               id={`${row.passenger_id}-title`}
               label={labels.titleField}

@@ -35,3 +35,16 @@ export const e164PhoneSchema = z
     message: "Phone number must be a valid international number in E.164 format (e.g. +442080160509).",
   })
   .transform((v) => formatDuffelPhone(v)!);
+
+/** Build E.164 from ISO country + national digits (signup UI). */
+export function buildE164FromParts(countryCallingCode: string, nationalNumber: string): string | null {
+  const cc = countryCallingCode.trim().replace(/^\+/, "");
+  const digits = nationalNumber.replace(/\D/g, "");
+  if (!cc || !digits) return null;
+  return formatDuffelPhone(`+${cc}${digits}`);
+}
+
+export const signupPhonePartsSchema = z.object({
+  country_calling_code: z.string().min(1).max(4),
+  national_number: z.string().min(4).max(20),
+});

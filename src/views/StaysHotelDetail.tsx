@@ -1,19 +1,28 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@/i18n/navigation";
 import { DetailPageLayout } from "@/components/shared/DetailPageLayout";
 import { ReviewsSection } from "@/components/shared/ReviewsSection";
 import { HotelDetailContent } from "@/components/hotels/HotelDetailContent";
 import { BookingSidebar } from "@/components/shared/BookingSidebar";
-import { WishlistToggle } from "@/components/wishlist/WishlistToggle";
 import type { HotelRoom } from "@/data/mock-hotels";
 import type { MockHotel } from "@/data/mock-hotels";
 import type { StaysRatesPayload, StaysQuoteDto } from "@/lib/api/stays-dto";
 import { staysRateToHotelRoom } from "@/lib/stays/stays-ui-map";
 import { getStaysRates, postStaysQuote } from "@/lib/http/stays.client";
+import { buildStaysQuoteSessionContext } from "@/lib/stays/stays-quote-context";
+import {
+  formatQuoteExpiryCountdown,
+  isStaysQuoteExpired,
+  quoteToSidebar,
+  writeStaysQuoteSession,
+} from "@/lib/stays/stays-quote-session";
 import { StaysHotelDetailLoading } from "@/components/hotels/StaysHotelDetailSkeleton";
 import { useBookingBreadcrumbHotelTitle } from "@/components/shared/BookingBreadcrumbHotelContext";
+import { buildHotelTripSnapshotFromRates, formatRouteLabel } from "@/lib/journey/journey-trip-snapshot";
+import { readStaysSearchFormSnapshot } from "@/lib/hotels/stays-search-snapshot";
+import { trackClientJourneyEvent } from "@/lib/http/journey.client";
 
 type SearchContext = {
   check_in_date?: string;
@@ -165,6 +174,8 @@ export default function StaysHotelDetail({ searchResultId }: StaysHotelDetailPro
   const [selectedRooms, setSelectedRooms] = useState<HotelRoom[]>([]);
   const [quote, setQuote] = useState<StaysQuoteDto | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteExpiryLabel, setQuoteExpiryLabel] = useState<string | null>(null);
+  const enrichSentRef = useRef(false);
 
   const checkIn = ctx.check_in_date ?? new Date().toISOString().slice(0, 10);
   const checkOut = ctx.check_out_date ?? new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10);
@@ -193,6 +204,44 @@ export default function StaysHotelDetail({ searchResultId }: StaysHotelDetailPro
     };
   }, [searchResultId]);
 
+  useEffect(() => {
+    if (!payload || enrichSentRef.current) return;
+    enrichSentRef.current = true;
+
+    const snap = readStaysSearchFormSnapshot();
+    const destLabel =
+      snap?.destination?.kind === "popular"
+        ? `${snap.destination.name}, ${snap.destination.country}`
+        : snap?.destination?.kind === "place"
+          ? snap.destination.city_name || snap.destination.name
+          : undefined;
+
+    const tripSnapshot = buildHotelTripSnapshotFromRates(payload, {
+      productRef: searchResultId,
+      checkIn: snap?.check_in_date ?? checkIn,
+      checkOut: snap?.check_out_date ?? checkOut,
+      adults: snap?.adults,
+      children: snap?.children,
+      rooms: snap?.rooms,
+      destinationLabel: destLabel,
+      detailPath: `/hotels/${encodeURIComponent(searchResultId)}`,
+    });
+
+    trackClientJourneyEvent({
+      event_type: "product.enriched",
+      product_type: "hotel",
+      product_ref: searchResultId,
+      stage: "viewed",
+      preserve_stage: true,
+      client_event_id: crypto.randomUUID(),
+      title: tripSnapshot.hotel_name ?? undefined,
+      subtitle: formatRouteLabel(tripSnapshot),
+      price_amount: tripSnapshot.price_amount,
+      price_currency: tripSnapshot.price_currency,
+      trip_snapshot: tripSnapshot,
+    });
+  }, [payload, searchResultId, checkIn, checkOut]);
+
   const hotel = useMemo(() => (payload ? ratesPayloadToMockHotel(payload, ctx) : null), [payload, ctx]);
 
   useEffect(() => {
@@ -213,6 +262,18 @@ export default function StaysHotelDetail({ searchResultId }: StaysHotelDetailPro
     try {
       const data = await postStaysQuote({ rate_id: rateId });
       setQuote(data);
+      const room = rooms.find((r) => r.id === rateId);
+      writeStaysQuoteSession({
+        quote: data,
+        checkIn,
+        checkOut,
+        searchResultId,
+        context: buildStaysQuoteSessionContext({
+          hotelName: hotel?.name ?? "",
+          hotelAddress: hotel?.address,
+          room: room ?? null,
+        }),
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Quote failed";
       setQuoteInlineError(
@@ -223,7 +284,7 @@ export default function StaysHotelDetail({ searchResultId }: StaysHotelDetailPro
     } finally {
       setQuoteLoading(false);
     }
-  }, []);
+  }, [checkIn, checkOut, searchResultId, rooms, hotel?.name, hotel?.address]);
 
   const handleAddRoom = useCallback(
     (room: HotelRoom) => {
@@ -237,7 +298,29 @@ export default function StaysHotelDetail({ searchResultId }: StaysHotelDetailPro
     setSelectedRooms((prev) => prev.filter((r) => r.id !== room.id));
     setQuote(null);
     setQuoteInlineError(null);
+    setQuoteExpiryLabel(null);
   }, []);
+
+  useEffect(() => {
+    if (!quote?.expires_at) {
+      setQuoteExpiryLabel(null);
+      return;
+    }
+    const tick = () => {
+      if (isStaysQuoteExpired(quote.expires_at)) {
+        setQuote(null);
+        setQuoteInlineError(
+          "This price lock has expired. Select the room again to refresh the rate before checkout.",
+        );
+        setQuoteExpiryLabel(null);
+        return;
+      }
+      setQuoteExpiryLabel(formatQuoteExpiryCountdown(quote.expires_at));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [quote?.expires_at, quote?.quote_id]);
 
   if (loading) {
     return <StaysHotelDetailLoading />;
@@ -285,23 +368,21 @@ export default function StaysHotelDetail({ searchResultId }: StaysHotelDetailPro
             </div>
           )}
           {quote && (
-            <div className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
-              <p className="font-semibold text-foreground">Price locked</p>
-              {quote.expires_at && (
-                <p className="text-muted-foreground">Quote expires: {new Date(quote.expires_at).toLocaleString()}</p>
-              )}
+            <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm dark:border-emerald-900/50 dark:bg-emerald-950/30">
+              <p className="font-semibold text-foreground">Price locked for checkout</p>
+              {quoteExpiryLabel ? (
+                <p className="text-muted-foreground">
+                  Complete payment within <span className="font-mono font-medium">{quoteExpiryLabel}</span> — Duffel
+                  rates expire quickly.
+                </p>
+              ) : quote.expires_at ? (
+                <p className="text-muted-foreground">
+                  Quote expires: {new Date(quote.expires_at).toLocaleString()}
+                </p>
+              ) : null}
             </div>
           )}
           {quoteLoading && <p className="text-sm text-muted-foreground mb-2">Getting quote…</p>}
-          <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-            <WishlistToggle
-              type="hotel"
-              refId={String(hotel.id)}
-              title={hotel.name}
-              subtitle={hotel.address}
-              imageUrl={hotel.images[0] ?? null}
-            />
-          </div>
           <HotelDetailContent
             hotel={{ ...hotel, rooms }}
             selectedRooms={selectedRooms}
@@ -322,13 +403,19 @@ export default function StaysHotelDetail({ searchResultId }: StaysHotelDetailPro
           staysQuoteLoading={quoteLoading}
           staysQuote={
             quote
-              ? {
-                  quoteId: quote.quote_id,
-                  totalAmount: quote.total_amount ?? "",
-                  currency: quote.total_currency ?? "USD",
-                  checkIn,
-                  checkOut,
-                }
+              ? quoteToSidebar(
+                  writeStaysQuoteSession({
+                    quote,
+                    checkIn,
+                    checkOut,
+                    searchResultId,
+                    context: buildStaysQuoteSessionContext({
+                      hotelName: hotel.name,
+                      hotelAddress: hotel.address,
+                      room: selectedRooms[0] ?? null,
+                    }),
+                  }),
+                )
               : null
           }
         />

@@ -16,7 +16,6 @@ export default function patchFR(d) {
     account: "Compte",
     profile: "Profil",
     bookings: "Réservations",
-    wishlists: "Listes de souhaits",
     adminConsole: "Console admin",
     logout: "Se déconnecter",
     login: "Connexion",

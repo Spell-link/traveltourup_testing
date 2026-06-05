@@ -129,21 +129,21 @@ export function AvailableRooms({
   const checkInLabel =
     stayFormSnap?.check_in_date
       ? new Date(`${stayFormSnap.check_in_date}T12:00:00`).toLocaleDateString(undefined, {
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        })
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
       : null;
   const searchStayNights =
     stayFormSnap?.check_in_date && stayFormSnap?.check_out_date
       ? Math.max(
-          1,
-          Math.round(
-            (new Date(stayFormSnap.check_out_date).getTime() -
-              new Date(stayFormSnap.check_in_date).getTime()) /
-              86400000,
-          ),
-        )
+        1,
+        Math.round(
+          (new Date(stayFormSnap.check_out_date).getTime() -
+            new Date(stayFormSnap.check_in_date).getTime()) /
+          86400000,
+        ),
+      )
       : null;
 
   const guestScore = hotelGuestRating != null && Number.isFinite(Number(hotelGuestRating)) ? Number(hotelGuestRating) : null;
@@ -157,7 +157,9 @@ export function AvailableRooms({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-foreground">Available rooms & rates</h2>
+        <h2 id="hotel-available-rooms-heading" className="text-xl font-bold text-foreground">
+          Available rooms & rates
+        </h2>
         {showDuffelRateHints ? (
           <p className="mt-1 text-sm text-muted-foreground">
             Select one rate to create a quote, then proceed to payment. Negotiated rates and loyalty programmes follow{" "}
@@ -232,25 +234,24 @@ export function AvailableRooms({
           return (
             <article
               key={room.id}
-              className={`overflow-hidden rounded-lg border-2 transition-all sm:rounded-xl ${
-                isSelected ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"
-              }`}
+              className={`overflow-hidden rounded-lg border-1 transition-all sm:rounded-xl p-3 ${isSelected ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"
+                }`}
             >
-              <div className="flex min-h-[128px] w-full min-w-0 flex-row sm:min-h-[200px] lg:items-stretch">
-                <div className="relative h-[128px] w-[40%] min-w-24 max-w-[44%] shrink-0 self-start bg-muted sm:h-[200px] sm:w-[35%] sm:min-w-[7.5rem] sm:max-w-[40%] lg:h-auto lg:min-h-[200px] lg:self-stretch">
+              <div className="flex min-h-[128px] w-full min-w-0 flex-row sm:min-h-[150px] lg:items-stretch">
+                <div className="relative h-[150px] w-[40%] min-w-24 max-w-[44%] shrink-0 self-start bg-muted sm:h-[150px] sm:w-[35%] sm:min-w-[7.5rem] sm:max-w-[40%] lg:h-auto lg:min-h-[150px] lg:self-stretch">
                   <div className="absolute inset-0">
                     <Image
                       src={room.image}
                       alt={room.name}
                       fill
-                      className="object-cover"
+                      className="object-cover rounded-lg"
                       sizes="(max-width: 640px) 40vw, (max-width: 1024px) 35vw, 280px"
                       unoptimized={shouldUnoptimizeStaysSupplierImage(room.image)}
                     />
                   </div>
                 </div>
 
-                <div className="flex min-w-0 flex-1 flex-col p-1.5 sm:p-4">
+                <div className="flex min-w-0 flex-1 flex-col px-1.5 sm:px-4">
                   <div className="mb-1.5 flex w-full min-w-0 flex-row items-start justify-between gap-1.5 sm:mb-3 sm:gap-4">
                     <div className="min-w-0 flex-1">
                       <div className="mb-0.5 flex min-w-0 flex-wrap items-start justify-between gap-1.5 sm:mb-1 sm:gap-2">
@@ -297,11 +298,10 @@ export function AvailableRooms({
                           {[0, 1, 2, 3, 4].map((i) => (
                             <Star
                               key={i}
-                              className={`h-3 w-3 sm:h-4 sm:w-4 ${
-                                i < starFillCount
-                                  ? "fill-[#F6AD55] text-[#F6AD55]"
-                                  : "text-muted-foreground/40"
-                              }`}
+                              className={`h-3 w-3 sm:h-4 sm:w-4 ${i < starFillCount
+                                ? "fill-[#F6AD55] text-[#F6AD55]"
+                                : "text-muted-foreground/40"
+                                }`}
                               aria-hidden
                             />
                           ))}
@@ -322,9 +322,9 @@ export function AvailableRooms({
                           <p className="text-primary break-words text-base font-bold leading-tight sm:text-2xl sm:leading-normal">
                             {formatPrice(Number.parseFloat(room.totalStayAmount!), cur, locale)}
                           </p>
-                          <p className="text-[9px] leading-tight text-muted-foreground sm:text-xs sm:leading-normal">
+                          {/* <p className="text-[9px] leading-tight text-muted-foreground sm:text-xs sm:leading-normal">
                             {nights} night{nights !== 1 ? "s" : ""}
-                          </p>
+                          </p> */}
                           <p className="text-muted-foreground mt-0.5 text-[9px] leading-tight sm:text-xs sm:leading-normal">
                             Avg{" "}
                             {formatPrice(
@@ -345,63 +345,82 @@ export function AvailableRooms({
                           </p>
                         </div>
                       )}
-                      <div className="mt-auto flex w-full max-w-full flex-col items-stretch justify-end gap-1 sm:mt-0 sm:flex-wrap sm:items-end sm:justify-end sm:gap-2">
-                        {single ? (
-                          isSelected ? (
-                            <button
-                              type="button"
-                              onClick={() => onRemoveRoom(room)}
-                              className="inline-flex items-center justify-center gap-1 rounded-md border border-input bg-card px-2 py-1.5 text-xs font-medium text-foreground hover:bg-muted sm:gap-2 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-sm"
-                            >
-                              Clear selection
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => onAddRoom(room)}
-                              className="inline-flex items-center justify-center gap-1 rounded-md bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 sm:gap-2 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-sm"
-                            >
-                              Select rate
-                            </button>
-                          )
-                        ) : isSelected ? (
-                          <div className="flex w-full max-w-full flex-nowrap items-center justify-end gap-1">
-                            <button
-                              type="button"
-                              onClick={() => onRemoveRoom(room)}
-                              className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-1.5 text-foreground hover:bg-muted/80 sm:gap-1.5 sm:rounded-lg sm:px-2 sm:py-1.5"
-                              aria-label="Remove one"
-                            >
-                              <Minus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                            </button>
-                            <span className="inline-flex min-w-0 max-w-[50%] flex-1 items-center justify-center gap-1 rounded-md bg-primary px-1.5 py-1.5 text-[11px] font-medium text-primary-foreground sm:min-w-[7rem] sm:max-w-none sm:gap-1.5 sm:rounded-lg sm:px-3 sm:py-2 sm:text-sm">
-                              <Check className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-                              {quantity > 1 ? `Selected (${quantity})` : "Selected"}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => onAddRoom(room)}
-                              className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-1.5 text-foreground hover:bg-muted/80 sm:gap-1.5 sm:rounded-lg sm:px-2 sm:py-1.5"
-                              aria-label="Add one more"
-                            >
-                              <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                            </button>
-                          </div>
+                    </div>
+                  </div>
+                  <div className="mt-auto flex w-full  flex-row justify-between gap-1 sm:mt-0 flex-wrap sm:gap-2">
+                    <div className="flex flex-row gap-4">
+                      <button
+                        type="button"
+                        onClick={() => togglePolicyExpanded(room.id)}
+                        className="shrink-0 text-xs font-medium text-primary hover:underline sm:text-sm"
+                        aria-expanded={false}
+                      >
+                        Show more
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRoomPhotosOpen(roomPhotosOpen === room.id ? null : room.id)}
+                        className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-primary hover:underline sm:gap-1.5 sm:text-xs"
+                      >
+                        <ImageIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" aria-hidden />
+                        Room photos
+                      </button>
+                    </div>
+                    <div className="w-full sm:w-auto flex justify-end">
+                      {single ? (
+                        isSelected ? (
+                          <button
+                            type="button"
+                            onClick={() => onRemoveRoom(room)}
+                            className="inline-flex items-center justify-center gap-1 rounded-md border border-input bg-card px-2 py-1.5 text-xs font-medium text-foreground hover:bg-muted sm:gap-2 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-sm"
+                          >
+                            Clear selection
+                          </button>
                         ) : (
                           <button
                             type="button"
                             onClick={() => onAddRoom(room)}
-                            className="inline-flex w-full min-w-0 items-center justify-center gap-1 rounded-md bg-primary/10 px-2 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 sm:w-auto sm:gap-2 sm:rounded-lg sm:px-4 sm:py-2 sm:text-sm"
+                            className="inline-flex items-center justify-center gap-1 rounded-md bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 sm:gap-2 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-sm"
                           >
-                            Select
+                            Select rate
                           </button>
-                        )}
-                      </div>
+                        )
+                      ) : isSelected ? (
+                        <div className="flex w-full max-w-full flex-nowrap items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => onRemoveRoom(room)}
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-1.5 text-foreground hover:bg-muted/80 sm:gap-1.5 sm:rounded-lg sm:px-2 sm:py-1.5"
+                            aria-label="Remove one"
+                          >
+                            <Minus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                          </button>
+                          <span className="inline-flex min-w-0 max-w-[50%] flex-1 items-center justify-center gap-1 rounded-md bg-primary px-1.5 py-1.5 text-[11px] font-medium text-primary-foreground sm:min-w-[7rem] sm:max-w-none sm:gap-1.5 sm:rounded-lg sm:px-3 sm:py-2 sm:text-sm">
+                            <Check className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                            {quantity > 1 ? `Selected (${quantity})` : "Selected"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onAddRoom(room)}
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-muted p-1.5 text-foreground hover:bg-muted/80 sm:gap-1.5 sm:rounded-lg sm:px-2 sm:py-1.5"
+                            aria-label="Add one more"
+                          >
+                            <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onAddRoom(room)}
+                          className="inline-flex w-full min-w-0 items-center justify-center gap-1 rounded-md bg-primary/10 px-2 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 sm:w-auto sm:gap-2 sm:rounded-lg sm:px-4 sm:py-2 sm:text-sm"
+                        >
+                          Select
+                        </button>
+                      )}
                     </div>
                   </div>
-
                   <div className="min-w-0 sm:mb-2">
-                    {hasExpandableDetails ? (
+                    {hasExpandableDetails && (
                       policyExpanded ? (
                         <div className="mt-1.5 text-xs sm:mt-2">
                           {hasFeatureGrid ? (
@@ -442,57 +461,10 @@ export function AvailableRooms({
                               says otherwise.
                             </p>
                           ) : null}
-                         
-                          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 sm:mt-2">
-                            <button
-                              type="button"
-                              onClick={() => togglePolicyExpanded(room.id)}
-                              className="shrink-0 text-xs font-medium text-primary hover:underline sm:text-sm"
-                              aria-expanded={true}
-                            >
-                              Show less
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setRoomPhotosOpen(roomPhotosOpen === room.id ? null : room.id)}
-                              className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-primary hover:underline sm:gap-1.5 sm:text-xs"
-                            >
-                              <ImageIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" aria-hidden />
-                              Room photos
-                            </button>
-                          </div>
                         </div>
                       ) : (
-                        <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-                          <button
-                            type="button"
-                            onClick={() => togglePolicyExpanded(room.id)}
-                            className="shrink-0 text-xs font-medium text-primary hover:underline sm:text-sm"
-                            aria-expanded={false}
-                          >
-                            Show more
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setRoomPhotosOpen(roomPhotosOpen === room.id ? null : room.id)}
-                            className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-primary hover:underline sm:gap-1.5 sm:text-xs"
-                          >
-                            <ImageIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" aria-hidden />
-                            Room photos
-                          </button>
-                        </div>
+                        null
                       )
-                    ) : (
-                      <div className="mt-1 flex justify-end sm:mt-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setRoomPhotosOpen(roomPhotosOpen === room.id ? null : room.id)}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline sm:gap-1.5 sm:text-xs"
-                        >
-                          <ImageIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" aria-hidden />
-                          Room photos
-                        </button>
-                      </div>
                     )}
                   </div>
                 </div>
@@ -530,11 +502,10 @@ export function AvailableRooms({
                   key={item}
                   type="button"
                   onClick={() => setRoomListPage(item)}
-                  className={`inline-flex h-10 min-w-[2.5rem] items-center justify-center rounded-lg border px-3 text-sm ${
-                    displayRoomPage === item
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-input bg-card hover:bg-muted"
-                  }`}
+                  className={`inline-flex h-10 min-w-[2.5rem] items-center justify-center rounded-lg border px-3 text-sm ${displayRoomPage === item
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-input bg-card hover:bg-muted"
+                    }`}
                 >
                   {item}
                 </button>

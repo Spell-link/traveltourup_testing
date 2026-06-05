@@ -1,11 +1,13 @@
-import { NextRequest } from "next/server";
+import { after, NextRequest } from "next/server";
 import { handleApiError } from "@/lib/api/error-handler";
 import { AppError, ValidationError } from "@/lib/api/errors";
 import { successResponse } from "@/lib/api/response";
 import { requireUserId } from "@/lib/authz/server";
 import { getServerAuthz } from "@/lib/authz/session";
 import { isDuffelConfigured } from "@/lib/duffel/config";
+import { logger } from "@/lib/obs/logger";
 import { createDuffelStayBooking } from "@/lib/services/stays/stays-booking.service";
+import { notifyStayBookingConfirmed } from "@/lib/services/stays/stays-booking-notify.service";
 import { staysBookingBodySchema } from "@/lib/validations/stays.schema";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +15,7 @@ export const dynamic = "force-dynamic";
 const BOOKING_IDEMPOTENCY_HEADER = "idempotency-key";
 
 export async function POST(req: NextRequest) {
+  const log = logger.withContext({});
   try {
     if (!isDuffelConfigured()) {
       throw new AppError(503, "Stays bookings are not configured.", "STAYS_NOT_CONFIGURED");
@@ -38,6 +41,15 @@ export async function POST(req: NextRequest) {
       body: parsed.data,
       idempotencyKey: idem,
     });
+
+    const bookingId = typeof booking.id === "string" ? booking.id : null;
+    if (bookingId) {
+      after(() => {
+        void notifyStayBookingConfirmed(bookingId).catch((err) => {
+          log.warn("Hotel booking confirmation job failed", { error: String(err) });
+        });
+      });
+    }
 
     return successResponse(booking, 201);
   } catch (e) {

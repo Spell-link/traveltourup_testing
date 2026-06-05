@@ -1,3 +1,17 @@
+# Stays (hotels) payment flow — TravelTourUp (Stripe + Duffel Balance)
+
+**Implemented checkout (2026):** Customer pays via **Stripe Payment Intents** (`capture_method: manual`); supplier is settled from **Duffel Balance** (`POST /stays/bookings` without `payment`). Navbar currency (USD/PKR/SAR/EUR) with fallback to quote currency when Stripe cannot present the selected currency.
+
+**Key routes:** `POST /api/v1/stays/checkout/prepare`, `POST /api/v1/stays/bookings`, `POST /api/v1/stays/bookings/:id/cancel`, `POST /api/v1/webhooks/stripe`.
+
+**Env:** `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STAYS_COMMISSION_PERCENT`, `STRIPE_FEE_RATE`.
+
+**UI:** `HotelCheckoutDuffel` → `StripePaymentForm`; cancel/refund in `HotelBookingCancelPanel`.
+
+Duffel **Card + 3DS** and **Duffel Payments** are not used for stays (product access not available for new orgs).
+
+---
+
 # Stays (hotels) payment flow — recommended Duffel pattern (starting platform)
 
 This document defines **best-practice payment architecture** for **Duffel Stays** when you are building a **booking platform from MVP upward**. It complements [Getting started with Stays](https://duffel.com/docs/guides/getting-started-with-stays) and Duffel’s payment-specific guides.

@@ -102,7 +102,7 @@ Develop a travel booking platform to streamline flight, hotel, and car rental ma
 - **Workflow Stages:**
   1. Auth hardening (login/signup/forgot password/2FA)
   2. Profile management → My Bookings → My Reviews
-  3. Wishlists → Returns/Refunds UX → Wallet (credit/debit)
+  3. Returns/Refunds UX → Wallet (credit/debit)
   4. Account activity and notification preferences
 
 - **Key Features:**
@@ -110,17 +110,15 @@ Develop a travel booking platform to streamline flight, hotel, and car rental ma
   2. User profile with personal details and preferences
   3. My Bookings — flight, hotel, car history with status
   4. My Reviews — submit and manage reviews for trips
-  5. Wishlists — save flights, hotels, destinations
-  6. Returns/Refunds — request and track refund status
-  7. Wallet — credit balance, transaction history, apply to bookings
+  5. Returns/Refunds — request and track refund status
+  6. Wallet — credit balance, transaction history, apply to bookings
 
 - **Data Management:**
   1. Customer profile (personal details, preferences)
   2. Booking history across all verticals
   3. Review and rating records
-  4. Wishlist items
-  5. Wallet transactions and balances
-  6. Refund request tracking
+  4. Wallet transactions and balances
+  5. Refund request tracking
 
 - **Timeline:** 3–4 weeks
 
@@ -221,7 +219,7 @@ Develop a travel booking platform to streamline flight, hotel, and car rental ma
 - **Workflow Stages:**
   1. **C1 — Foundation (1–2 weeks):** RN repo setup, auth, navigation, API client parity, error/empty states
   2. **C2 — Flights + Stays + Cars (3–5 weeks):** Full search, checkout, payment, bookings — parity with web
-  3. **C3 — Account & Growth (6–7 weeks):** Profile, wishlist, reviews, wallet/refunds, push notifications
+  3. **C3 — Account & Growth (6–7 weeks):** Profile, reviews, wallet/refunds, push notifications
   4. **C4 — i18n / Currency (2 weeks):** Match web locale + currency strategy
 
 - **Key Features:**
@@ -230,7 +228,7 @@ Develop a travel booking platform to streamline flight, hotel, and car rental ma
   3. Mobile-optimized checkout and payment
   4. Push notifications for booking updates
   5. Offline mode for saved bookings/itineraries
-  6. Profile, wishlist, reviews, and wallet
+  6. Profile, reviews, and wallet
   7. Multi-language and multi-currency parity with web
 
 - **Timeline:** ~2 months (1 senior RN developer)
@@ -300,7 +298,7 @@ Develop a travel booking platform to streamline flight, hotel, and car rental ma
 | Duffel stays (hotels)       | **In Progress** | Needs complete book + pay parity with flights |
 | Marketing / CMS             | **Substantial** | Home, About, Blog, Contact, Privacy, Terms, FAQs pages present |
 | Admin panel                 | **Scaffold**    | Users, roles, blogs, bookings, vertical lists exist; needs full ops + PDFs |
-| Auth & customer account     | **Partial**     | Login/signup/profile/bookings exist; wishlists, reviews, wallet, refunds need depth |
+| Auth & customer account     | **Partial**     | Login/signup/profile/bookings exist; reviews, wallet, refunds need depth |
 | i18n / multi-currency       | **Limited**     | Display formatting only; needs systematic locale + FX strategy |
 | Cars (third-party)          | **Mock**        | UI + mock flows — need real B2B car API integration end-to-end |
 | Database backups            | **Not Started** | Operational rollout needed |

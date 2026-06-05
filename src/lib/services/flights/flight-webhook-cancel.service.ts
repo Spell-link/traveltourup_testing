@@ -10,6 +10,7 @@ import {
   isNonCardRefundTo,
 } from "@/lib/services/flights/flight-refund.core";
 import { settleDuffelFlightRefundAfterCancellation } from "@/lib/services/flights/flight-refund.service";
+import { trackBookingCancelledJourney } from "@/lib/services/journey/booking-lifecycle-journey.service";
 
 const TERMINAL_PAYMENT_STATUSES = new Set([
   "refunded",
@@ -101,6 +102,17 @@ export async function reconcileExternalOrderCancellation(input: {
   });
 
   if (!wasAlreadyCancelled) {
+    trackBookingCancelledJourney({
+      bookingId: input.bookingId,
+      properties: {
+        source: "duffel_webhook",
+        duffel_order_id: input.duffelOrderId,
+        refund_amount: parsed.refundAmount,
+        refund_currency: parsed.refundCurrency,
+        refund_to: parsed.refundTo,
+      },
+    });
+
     try {
       const fullBooking = await bookingRepository.findById(input.bookingId);
       if (fullBooking) {

@@ -11,6 +11,7 @@ import { confirmOrderCancellation, createOrderCancellation } from "@/lib/duffel/
 import { DuffelApiError } from "@/lib/duffel/errors";
 import { prisma } from "@/lib/prisma";
 import { serializeBookingResponse } from "@/lib/services/booking.service";
+import { trackBookingCancelledJourney } from "@/lib/services/journey/booking-lifecycle-journey.service";
 import { sendFlightCancellationEmail } from "@/lib/services/flights/flight-emails.service";
 import {
   retryDuffelFlightRefundForBooking,
@@ -329,6 +330,17 @@ export async function processDuffelFlightBookingCancel(input: {
         },
       });
 
+      trackBookingCancelledJourney({
+        bookingId: row.id,
+        properties: {
+          booking_ref_no: row.booking_ref_no,
+          refund_amount: parsed.refundAmount,
+          refund_currency: parsed.refundCurrency,
+          refund_to: parsed.refundTo,
+          duffel_cancellation_id: parsed.duffelCancellationId,
+        },
+      });
+
       await sendFlightCancellationEmail({
         booking: row,
         refundAmount: parsed.refundAmount,
@@ -439,6 +451,17 @@ export async function processDuffelFlightBookingCancel(input: {
       payment_status: payStatus,
       airline_refund_to_balance: parsed.refundAmount,
       refund_currency: parsed.refundCurrency,
+    },
+  });
+
+  trackBookingCancelledJourney({
+    bookingId: row.id,
+    properties: {
+      booking_ref_no: row.booking_ref_no,
+      refund_amount: parsed.refundAmount,
+      refund_currency: parsed.refundCurrency,
+      refund_to: parsed.refundTo,
+      duffel_cancellation_id: oc.duffel_cancellation_id,
     },
   });
 

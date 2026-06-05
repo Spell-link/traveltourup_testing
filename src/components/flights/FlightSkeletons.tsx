@@ -367,11 +367,16 @@ export function FeaturedFlightsSectionFallback({ bgColor = "bg-muted/40" }: { bg
 
 export function FlightsHubPageSkeleton() {
   return (
-    <div role="status" aria-live="polite" aria-label="Loading flights">
-      <div id="flight-search" className="scroll-mt-16 bg-muted px-4 pt-10 md:px-10">
+    <div role="status" aria-live="polite" aria-label="Loading flights" className="md:relative">
+      <div
+        id="flight-search"
+        className="scroll-mt-16 bg-muted px-4 pt-10 md:absolute md:inset-x-0 md:z-20 md:container md:mx-auto md:-mt-36 md:max-w-7xl md:px-4 md:pt-0 md:pb-6 md:rounded-xl md:bg-background md:shadow-xl md:border md:border-border/50 md:p-6"
+      >
         <FlightsTabSkeleton variant="page" />
       </div>
-      <FeaturedFlightsSectionFallback bgColor="bg-muted/40" />
+      <div className="md:pt-48">
+        <FeaturedFlightsSectionFallback bgColor="bg-muted/40" />
+      </div>
     </div>
   );
 }
@@ -546,7 +551,7 @@ export function CheckoutLoadingSkeleton() {
           </div>
         </div>
         <div className="lg:col-span-1">
-          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+          <div className="overflow-auto rounded-2xl border border-border bg-card shadow-sm dropdown-scrollbar max-h-[calc(100vh-6rem)]">
             <div className="h-14 animate-pulse bg-muted" />
             <div className="space-y-4 p-6">
               <div className="h-5 w-3/4 animate-pulse rounded bg-muted-foreground/15" />
